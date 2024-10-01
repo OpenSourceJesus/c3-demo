@@ -4,6 +4,7 @@ from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
 EMSDK = os.path.join(_thisdir, "emsdk")
 BLENDER = 'blender'
+SCALE = 100
 
 if not os.path.isdir('c3'):
 	if not os.path.isfile('c3-ubuntu-20.tar.gz'):
@@ -34,7 +35,7 @@ if not EMCC and "--wasm" in sys.argv:
 	emsdk_update()
 
 
-def build(input='./demo.c3', output='c3-demo.bin', wasm=False, opt=False):
+def build(input='./demo.c3', output='c3-demo.bin', wasm=False, opt=False, run=True):
 	cmd = [C3, '-l', './raylib-5.0_linux_amd64/lib/libraylib.a']
 	if wasm:
 		cmd += [
@@ -70,7 +71,8 @@ def build(input='./demo.c3', output='c3-demo.bin', wasm=False, opt=False):
 		if ln.endswith('.o'):
 			ofiles.append(ln.strip())
 	print(ofiles)
-	subprocess.check_call(['/tmp/'+output])
+	if run:
+		subprocess.check_call(['/tmp/'+output])
 
 
 try:
@@ -123,7 +125,7 @@ MAIN = '''
 '''
 
 def safename(ob):
-	return ob.name.replace('.', '_')
+	return ob.name.lower().replace('.', '_')
 
 def blender_to_c3():
 	head  = [HEADER]
@@ -133,13 +135,16 @@ def blender_to_c3():
 		'	Object object;',
 		'	float dt = raylib::get_frame_time();',
 		'	raylib::begin_drawing();',
-		'	raylib::clear_background({0x18, 0x18, 0x18, 0xFF});',
+		'	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});',
 	]
 	meshes = []
+	datas = {}
 	for ob in bpy.data.objects:
 		sname = safename(ob)
+		x,y,z = ob.location * SCALE
+		x += 100
+		y += 100
 		idx = len(meshes)
-		x,y,z = ob.location
 		if ob.type=="MESH":
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
@@ -147,10 +152,31 @@ def blender_to_c3():
 
 			draw.append('	object = objects[%s];' % idx)
 			draw.append('	raylib::draw_rectangle_v(object.position, PLAYER_SIZE, object.color);')
+		elif ob.type=='GPENCIL':
+			meshes.append(ob)
+			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
+			dname = safename(ob.data)
+			if dname not in datas:
+				datas[dname]=1
+				data = []
+				for sidx, stroke in enumerate( ob.data.layers[0].frames[0].strokes ):
+					data.append('Vector2[%s] __%s__%s = {' % (len(stroke.points),dname, sidx ))
+					s = []
+					for pnt in stroke.points:
+						x,y,z = pnt.co * SCALE
+						s.append('{%s,%s}' % (x,-z))
+					data.append('\t' + ','.join(s))
+					data.append('};')
+				head += data
+
+			for sidx, stroke in enumerate( ob.data.layers[0].frames[0].strokes ):
+				n = len(stroke.points)
+				draw.append('	raylib::draw_spline(&__%s__%s, %s, 2.0, raylib::color_from_hsv(0,1,0.5));' % (dname, sidx, n))
+
 
 	setup.append(MAIN)
 	setup.append('}')
-	draw.append('raylib::end_drawing();')
+	draw.append('	raylib::end_drawing();')
 	draw.append('}')
 
 	head.append('Object[%s] objects;' % len(meshes))
@@ -190,3 +216,7 @@ def test():
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
 	build(input=tmp)
+
+bpy.ops.object.gpencil_add(type='MONKEY')
+bpy.context.active_object.location.x += 2
+test()
