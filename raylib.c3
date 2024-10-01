@@ -24,3 +24,5 @@ extern fn int get_screen_width() @extern("GetScreenWidth");
 extern fn int get_screen_height() @extern("GetScreenHeight");
 extern fn Color color_from_hsv(float hue, float saturation, float value) @extern("ColorFromHSV");
 extern fn int get_random_value(int min, int max) @extern("GetRandomValue");
+
+extern fn void draw_spline(Vector2 *points, int pointCount, float thick, Color color) @extern("DrawSplineLinear");
