@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 import os, sys, subprocess
-
+from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
 EMSDK = os.path.join(_thisdir, "emsdk")
 BLENDER = 'blender'
@@ -34,7 +34,7 @@ if not EMCC and "--wasm" in sys.argv:
 	emsdk_update()
 
 
-def build(output='c3-demo.bin', wasm=False, opt=False):
+def build(input='./demo.c3', output='c3-demo.bin', wasm=False, opt=False):
 	cmd = [C3, '-l', './raylib-5.0_linux_amd64/lib/libraylib.a']
 	if wasm:
 		cmd += [
@@ -62,11 +62,7 @@ def build(output='c3-demo.bin', wasm=False, opt=False):
 	if opt:
 		cmd.append('-Oz')
 
-	cmd += [
-		mode, 
-		'./demo.c3',
-		'./raylib.c3',
-	]
+	cmd += [mode, input, './raylib.c3']
 	print(cmd)
 	res = subprocess.check_output(cmd).decode('utf-8')
 	ofiles = []
@@ -77,6 +73,89 @@ def build(output='c3-demo.bin', wasm=False, opt=False):
 	subprocess.check_call(['/tmp/'+output])
 
 
+try:
+	import bpy
+except:
+	bpy = None
 
 if __name__=='__main__':
-	build()
+	if bpy:
+		pass
+	elif '--blender' in sys.argv:
+		cmd = [BLENDER, '--python', __file__]
+		print(cmd)
+		subprocess.check_call(cmd)
+		sys.exit()
+	else:
+		build()
+
+## blender ##
+import bpy
+
+HEADER = '''
+import raylib;
+def Entry = fn void();
+extern fn void raylib_js_set_entry(Entry entry) @wasm;
+const Vector2 PLAYER_SIZE = {100, 100};
+const Vector2 GRAVITY = {0, 1000};
+const int N = 10;
+const float COLLISION_DAMP = 1;
+
+struct Object {
+	Vector2 position;
+	Vector2 velocity;
+	Color color;
+}
+'''
+
+def safename(ob):
+	return ob.name.replace('.', '_')
+
+def blender_to_c3():
+	head  = [HEADER]
+	setup = ['fn void main() @extern("main") @wasm {']
+	draw  = [
+		'fn void game_frame() @wasm {',
+		'	Object object;',
+	]
+	meshes = []
+	for ob in bpy.data.objects:
+		sname = safename(ob)
+		idx = len(meshes)
+		x,y,z = ob.location
+		if ob.type=="MESH":
+			meshes.append(ob)
+			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
+			setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
+
+			draw.append('	object = objects[%s];' % idx)
+			draw.append('	raylib::draw_rectangle_v(object.position, PLAYER_SIZE, object.color);')
+
+	setup.append('}')
+	draw.append('}')
+
+	head.append('Object[%s] objects;' % len(meshes))
+
+	return head + setup + draw
+
+
+@bpy.utils.register_class
+class C3Export(bpy.types.Operator):
+	bl_idname = "c3.export"
+	bl_label = "C3 Export EXE"
+	@classmethod
+	def poll(cls, context):
+		return True
+	def execute(self, context):
+		blender_to_c3()
+		return {"FINISHED"}
+
+def test():
+	o = blender_to_c3()
+	o = '\n'.join(o)
+	print(o)
+	tmp = '/tmp/c3blender.c3'
+	open(tmp, 'w').write(o)
+	build(input=tmp)
+
+test()
