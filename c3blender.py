@@ -108,6 +108,20 @@ struct Object {
 }
 '''
 
+MAIN = '''
+	raylib::init_window(800, 600, "Hello, from C3 WebAssembly");
+	raylib::set_target_fps(60);
+
+	$if $feature(PLATFORM_WEB):
+		raylib_js_set_entry(&game_frame);
+	$else
+		while (!raylib::window_should_close()) {
+			game_frame();
+		}
+		raylib::close_window();
+	$endif
+'''
+
 def safename(ob):
 	return ob.name.replace('.', '_')
 
@@ -117,6 +131,9 @@ def blender_to_c3():
 	draw  = [
 		'fn void game_frame() @wasm {',
 		'	Object object;',
+		'	float dt = raylib::get_frame_time();',
+		'	raylib::begin_drawing();',
+		'	raylib::clear_background({0x18, 0x18, 0x18, 0xFF});',
 	]
 	meshes = []
 	for ob in bpy.data.objects:
@@ -131,7 +148,9 @@ def blender_to_c3():
 			draw.append('	object = objects[%s];' % idx)
 			draw.append('	raylib::draw_rectangle_v(object.position, PLAYER_SIZE, object.color);')
 
+	setup.append(MAIN)
 	setup.append('}')
+	draw.append('raylib::end_drawing();')
 	draw.append('}')
 
 	head.append('Object[%s] objects;' % len(meshes))
@@ -147,8 +166,22 @@ class C3Export(bpy.types.Operator):
 	def poll(cls, context):
 		return True
 	def execute(self, context):
-		blender_to_c3()
+		#blender_to_c3()
+		test()
 		return {"FINISHED"}
+
+@bpy.utils.register_class
+class C3WorldPanel(bpy.types.Panel):
+	bl_idname = "WORLD_PT_C3World_Panel"
+	bl_label = "C3 Export"
+	bl_space_type = "PROPERTIES"
+	bl_region_type = "WINDOW"
+	bl_context = "world"
+
+	def draw(self, context):
+		#self.layout.operator("c3.export_wasm", icon="CONSOLE")
+		self.layout.operator("c3.export", icon="CONSOLE")
+
 
 def test():
 	o = blender_to_c3()
@@ -157,5 +190,3 @@ def test():
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
 	build(input=tmp)
-
-test()
