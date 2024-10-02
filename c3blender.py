@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import os, sys, subprocess
+import os, sys, subprocess, atexit, webbrowser
 from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
 EMSDK = os.path.join(_thisdir, "emsdk")
@@ -35,15 +35,14 @@ if not EMCC and "--wasm" in sys.argv:
 	emsdk_update()
 
 
-def build(input='./demo.c3', output='c3-demo.bin', wasm=False, opt=False, run=True):
-	cmd = [C3, '-l', './raylib-5.0_linux_amd64/lib/libraylib.a']
+def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True):
+	cmd = [C3]
 	if wasm:
-		cmd += [
-			'--target', 'wasm32',
-			'--linker=custom', './emsdk/upstream/bin/wasm-ld'
-		]
+		cmd += ['--target', 'wasm32']
+		if os.path.isfile('./emsdk/upstream/bin/wasm-ld'):
+			cmd += ['--linker=custom', './emsdk/upstream/bin/wasm-ld']
 	else:
-		cmd += ['--target', 'linux-x64']
+		cmd += ['--target', 'linux-x64', '-l', './raylib-5.0_linux_amd64/lib/libraylib.a']
 	mode = 'compile'
 
 	cmd += [
@@ -55,8 +54,7 @@ def build(input='./demo.c3', output='c3-demo.bin', wasm=False, opt=False, run=Tr
 	]
 	if wasm:
 		cmd += [#'--link-libc=no', '--use-stdlib=no', 
-			'--no-entry', '--reloc=none']
-		pass
+			'--no-entry', '--reloc=none', '-z', '--export-table']
 	else:
 		cmd += ['-l', 'glfw']
 
@@ -71,8 +69,13 @@ def build(input='./demo.c3', output='c3-demo.bin', wasm=False, opt=False, run=Tr
 		if ln.endswith('.o'):
 			ofiles.append(ln.strip())
 	print(ofiles)
-	if run:
+	if run and not wasm:
 		subprocess.check_call(['/tmp/'+output])
+
+	if wasm:
+		return '/tmp/%s.wasm' % output
+	else:
+		return '/tmp/%s' % output
 
 
 try:
@@ -192,8 +195,18 @@ class C3Export(bpy.types.Operator):
 	def poll(cls, context):
 		return True
 	def execute(self, context):
-		#blender_to_c3()
-		test()
+		build_linux()
+		return {"FINISHED"}
+
+@bpy.utils.register_class
+class C3Export(bpy.types.Operator):
+	bl_idname = "c3.export_wasm"
+	bl_label = "C3 Export WASM"
+	@classmethod
+	def poll(cls, context):
+		return True
+	def execute(self, context):
+		build_wasm()
 		return {"FINISHED"}
 
 @bpy.utils.register_class
@@ -205,18 +218,35 @@ class C3WorldPanel(bpy.types.Panel):
 	bl_context = "world"
 
 	def draw(self, context):
-		#self.layout.operator("c3.export_wasm", icon="CONSOLE")
+		self.layout.operator("c3.export_wasm", icon="CONSOLE")
 		self.layout.operator("c3.export", icon="CONSOLE")
 
-
-def test():
+def build_linux():
 	o = blender_to_c3()
 	o = '\n'.join(o)
 	print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
-	build(input=tmp)
+	bin = build(input=tmp)
+
+SERVER_PROC = None
+def build_wasm():
+	global SERVER_PROC
+	if SERVER_PROC: SERVER_PROC.kill()
+	o = blender_to_c3()
+	o = '\n'.join(o)
+	print(o)
+	tmp = '/tmp/c3blender.c3'
+	open(tmp, 'w').write(o)
+	wasm = build(input=tmp, wasm=True)
+	os.system('cp -v ./index.html /tmp/.')
+	os.system('cp -v ./raylib.js /tmp/.')
+	cmd = ['python', '-m', 'http.server', '6969']
+	SERVER_PROC = subprocess.Popen(cmd, cwd='/tmp')
+	atexit.register(lambda:SERVER_PROC.kill())
+	webbrowser.open('http://localhost:6969')
+
 
 bpy.ops.object.gpencil_add(type='MONKEY')
 bpy.context.active_object.location.x += 2
-test()
+#build_wasm()
