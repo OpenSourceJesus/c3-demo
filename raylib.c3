@@ -26,3 +26,4 @@ extern fn Color color_from_hsv(float hue, float saturation, float value) @extern
 extern fn int get_random_value(int min, int max) @extern("GetRandomValue");
 
 extern fn void draw_spline(Vector2 *points, int pointCount, float thick, Color color) @extern("DrawSplineLinear");
+extern fn void draw_circle_v(Vector2 center, float radius, Color color) @extern("DrawCircleV");
