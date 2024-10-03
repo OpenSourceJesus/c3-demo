@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import os, sys, subprocess, atexit, webbrowser
+import os, sys, subprocess, atexit, webbrowser, math
 from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
 EMSDK = os.path.join(_thisdir, "emsdk")
@@ -87,7 +87,7 @@ except:
 if __name__=='__main__':
 	if bpy:
 		pass
-	elif '--blender' in sys.argv:
+	elif '--blender' in sys.argv or os.path.isfile('/usr/bin/blender'):
 		cmd = [BLENDER, '--python', __file__]
 		print(cmd)
 		subprocess.check_call(cmd)
@@ -96,7 +96,12 @@ if __name__=='__main__':
 		build()
 
 ## blender ##
-import bpy
+if not bpy:
+	if not os.path.isfile('/usr/bin/blender'):
+		print('did you install blender?')
+		print('snap install blender')
+	print('run: python3 c3blender.py --blender')
+	sys.exit()
 
 HEADER = '''
 import raylib;
@@ -127,6 +132,12 @@ MAIN = '''
 		raylib::close_window();
 	$endif
 '''
+
+def is_maybe_circle(ob):
+	if len(ob.data.vertices)==32 and len(ob.data.polygons) == 1:
+		return True
+	else:
+		return False
 
 def safename(ob):
 	return ob.name.lower().replace('.', '_')
@@ -164,13 +175,25 @@ def blender_to_c3():
 
 			draw.append('	self = objects[%s];' % idx)
 			if scripts:
+				props = {}
+				for prop in ob.keys():
+					if prop.startswith( ('_', 'c3_') ): continue
+					head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
+					props[prop] = ob[prop]
+
 				## user C3 scripts
 				for s in scripts:
+					for prop in props:
+						if 'self.'+prop in s:
+							s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
 					draw.append('\t' + s)
 				## save object state: from stack back to heap
 				draw.append('	objects[%s] = self;' % idx)
 
-			draw.append('	raylib::draw_rectangle_v(self.position, PLAYER_SIZE, self.color);')
+			if is_maybe_circle(ob):
+				draw.append('	raylib::draw_circle_v(self.position, PLAYER_SIZE.x, self.color);')
+			else:
+				draw.append('	raylib::draw_rectangle_v(self.position, PLAYER_SIZE, self.color);')
 		elif ob.type=='GPENCIL':
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
@@ -301,7 +324,7 @@ class C3ScriptsPanel(bpy.types.Panel):
 				foundUnassignedScript = not hasProperty
 
 
-EXAMPLE = '''
+EXAMPLE1 = '''
 self.velocity += GRAVITY*dt;
 float nx = self.position.x + self.velocity.x*dt;
 if (nx < 0 || nx + PLAYER_SIZE.x > raylib::get_screen_width()) {
@@ -319,13 +342,28 @@ if (ny < 0 || ny + PLAYER_SIZE.y > raylib::get_screen_height()) {
 }
 '''
 
+EXAMPLE2 = '''
+self.position.x += self.myprop;
+if (self.position.x >= 400) self.position.x = 0;
+'''
+
+
 def gen_test_scene():
 	bpy.ops.object.gpencil_add(type='MONKEY')
 	bpy.context.active_object.location.x += 2
 	ob = bpy.data.objects['Cube']
-	txt = bpy.data.texts.new(name='myscript.c3')
-	txt.from_string(EXAMPLE)
+	txt = bpy.data.texts.new(name='example1.c3')
+	txt.from_string(EXAMPLE1)
 	ob.c3_script0 = txt
+
+	bpy.ops.mesh.primitive_circle_add(fill_type="NGON")
+	ob = bpy.context.active_object
+	ob.location.x = 5
+	ob.rotation_euler.x = math.pi / 2
+	txt = bpy.data.texts.new(name='example2.c3')
+	txt.from_string(EXAMPLE2)
+	ob.c3_script0 = txt
+	ob['myprop'] = 1.0
 
 gen_test_scene()
 #build_wasm()
