@@ -5,6 +5,7 @@ _thisdir = os.path.split(os.path.abspath(__file__))[0]
 EMSDK = os.path.join(_thisdir, "emsdk")
 BLENDER = 'blender'
 SCALE = 100
+MAX_SCRIPTS_PER_OBJECT = 8
 
 if not os.path.isdir('c3'):
 	if not os.path.isfile('c3-ubuntu-20.tar.gz'):
@@ -135,7 +136,7 @@ def blender_to_c3():
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
 		'fn void game_frame() @wasm {',
-		'	Object object;',
+		'	Object self;',
 		'	float dt = raylib::get_frame_time();',
 		'	raylib::begin_drawing();',
 		'	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});',
@@ -148,13 +149,28 @@ def blender_to_c3():
 		x += 100
 		y += 100
 		idx = len(meshes)
+
+		scripts = []
+		for i in range(MAX_SCRIPTS_PER_OBJECT):
+			txt = getattr(ob, "c3_script" + str(i))
+			if txt:
+				scripts.append(txt.as_string())
+
+
 		if ob.type=="MESH":
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
 
-			draw.append('	object = objects[%s];' % idx)
-			draw.append('	raylib::draw_rectangle_v(object.position, PLAYER_SIZE, object.color);')
+			draw.append('	self = objects[%s];' % idx)
+			if scripts:
+				## user C3 scripts
+				for s in scripts:
+					draw.append('\t' + s)
+				## save object state: from stack back to heap
+				draw.append('	objects[%s] = self;' % idx)
+
+			draw.append('	raylib::draw_rectangle_v(self.position, PLAYER_SIZE, self.color);')
 		elif ob.type=='GPENCIL':
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
@@ -247,6 +263,69 @@ def build_wasm():
 	webbrowser.open('http://localhost:6969')
 
 
-bpy.ops.object.gpencil_add(type='MONKEY')
-bpy.context.active_object.location.x += 2
+bpy.types.Object.c3_script_init = bpy.props.PointerProperty(
+	name="script init", type=bpy.types.Text
+)
+
+for i in range(MAX_SCRIPTS_PER_OBJECT):
+	setattr(
+		bpy.types.Object,
+		"c3_script" + str(i),
+		bpy.props.PointerProperty(name="script%s" % i, type=bpy.types.Text),
+	)
+
+
+
+@bpy.utils.register_class
+class C3ScriptsPanel(bpy.types.Panel):
+	bl_idname = "OBJECT_PT_C3_Scripts_Panel"
+	bl_label = "C3 Scripts"
+	bl_space_type = "PROPERTIES"
+	bl_region_type = "WINDOW"
+	bl_context = "object"
+
+	def draw(self, context):
+		if not context.active_object:
+			return
+		self.layout.label(text="Attach C3 Scripts")
+		self.layout.prop(context.active_object, "c3_script_init")
+
+		foundUnassignedScript = False
+		for i in range(MAX_SCRIPTS_PER_OBJECT):
+			hasProperty = (
+				getattr(context.active_object, "c3_script" + str(i)) != None
+			)
+			if hasProperty or not foundUnassignedScript:
+				self.layout.prop(context.active_object, "c3_script" + str(i))
+			if not foundUnassignedScript:
+				foundUnassignedScript = not hasProperty
+
+
+EXAMPLE = '''
+self.velocity += GRAVITY*dt;
+float nx = self.position.x + self.velocity.x*dt;
+if (nx < 0 || nx + PLAYER_SIZE.x > raylib::get_screen_width()) {
+	self.velocity.x *= -COLLISION_DAMP;
+	self.color = raylib::color_from_hsv(360*((float)raylib::get_random_value(0, 100)/100.0), 1, 1);
+} else {
+	self.position.x = nx;
+}
+float ny = self.position.y + self.velocity.y*dt;
+if (ny < 0 || ny + PLAYER_SIZE.y > raylib::get_screen_height()) {
+	self.velocity.y *= -COLLISION_DAMP;
+	self.color = raylib::color_from_hsv(360*((float)raylib::get_random_value(0, 100)/100.0), 1, 1);
+} else {
+	self.position.y = ny;
+}
+'''
+
+def gen_test_scene():
+	bpy.ops.object.gpencil_add(type='MONKEY')
+	bpy.context.active_object.location.x += 2
+	ob = bpy.data.objects['Cube']
+	txt = bpy.data.texts.new(name='myscript.c3')
+	txt.from_string(EXAMPLE)
+	ob.c3_script0 = txt
+
+gen_test_scene()
 #build_wasm()
