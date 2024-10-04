@@ -4,7 +4,6 @@ from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
 EMSDK = os.path.join(_thisdir, "emsdk")
 BLENDER = 'blender'
-SCALE = 100
 MAX_SCRIPTS_PER_OBJECT = 8
 
 if not os.path.isdir('c3'):
@@ -103,11 +102,12 @@ if not bpy:
 	print('run: python3 c3blender.py --blender')
 	sys.exit()
 
+#const Vector2 PLAYER_SIZE = {100, 100};
+
 HEADER = '''
 import raylib;
 def Entry = fn void();
 extern fn void raylib_js_set_entry(Entry entry) @wasm;
-const Vector2 PLAYER_SIZE = {100, 100};
 const Vector2 GRAVITY = {0, 1000};
 const int N = 10;
 const float COLLISION_DAMP = 1;
@@ -115,19 +115,20 @@ const float COLLISION_DAMP = 1;
 struct Object {
 	Vector2 position;
 	Vector2 velocity;
+	Vector2 scale;
 	Color color;
 }
 '''
 
 MAIN_WASM = '''
-	raylib::init_window(800, 600, "Hello, from C3 WebAssembly");
+	raylib::init_window(%s, %s, "Hello, from C3 WebAssembly");
 	raylib::set_target_fps(60);
 	raylib_js_set_entry(&game_frame);
 
 '''
 
 MAIN = '''
-	raylib::init_window(800, 600, "Hello, from C3");
+	raylib::init_window(%s, %s, "Hello, from C3");
 	raylib::set_target_fps(60);
 	while (!raylib::window_should_close()) {
 		game_frame();
@@ -145,6 +146,12 @@ def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
 def blender_to_c3(wasm=False):
+	resx = bpy.context.world.c3_export_res_x
+	resy = bpy.context.world.c3_export_res_y
+	SCALE = bpy.context.world.c3_export_scale
+	offx = bpy.context.world.c3_export_offset_x
+	offy = bpy.context.world.c3_export_offset_y
+
 	head  = [HEADER]
 	if wasm:
 		head.append('extern fn void draw_circle_wasm(int x, int y, float radius, Color color) @extern("DrawCircleWASM");')
@@ -161,8 +168,10 @@ def blender_to_c3(wasm=False):
 	for ob in bpy.data.objects:
 		sname = safename(ob)
 		x,y,z = ob.location * SCALE
-		x += 100
-		y += 100
+		z = -z
+		x += offx
+		z += offy
+		sx,sy,sz = ob.scale * SCALE
 		idx = len(meshes)
 
 		scripts = []
@@ -175,6 +184,7 @@ def blender_to_c3(wasm=False):
 		if ob.type=="MESH":
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
+			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
 			setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
 
 			draw.append('	self = objects[%s];' % idx)
@@ -196,11 +206,11 @@ def blender_to_c3(wasm=False):
 
 			if is_maybe_circle(ob):
 				if wasm:
-					draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, PLAYER_SIZE.x, self.color);')
+					draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x, self.color);')
 				else:
-					draw.append('	raylib::draw_circle_v(self.position, PLAYER_SIZE.x, self.color);')
+					draw.append('	raylib::draw_circle_v(self.position, self.scale.x, self.color);')
 			else:
-				draw.append('	raylib::draw_rectangle_v(self.position, PLAYER_SIZE, self.color);')
+				draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
 		elif ob.type=='GPENCIL':
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
@@ -212,8 +222,10 @@ def blender_to_c3(wasm=False):
 					data.append('Vector2[%s] __%s__%s = {' % (len(stroke.points),dname, sidx ))
 					s = []
 					for pnt in stroke.points:
-						x,y,z = pnt.co * SCALE
-						s.append('{%s,%s}' % (x,-z))
+						x1,y1,z1 = pnt.co
+						x1 *= sx
+						z1 *= sz
+						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
 					data.append('\t' + ','.join(s))
 					data.append('};')
 				head += data
@@ -223,9 +235,10 @@ def blender_to_c3(wasm=False):
 				draw.append('	raylib::draw_spline(&__%s__%s, %s, 2.0, raylib::color_from_hsv(0,1,0.5));' % (dname, sidx, n))
 
 	if wasm:
-		setup.append(MAIN_WASM)
+		setup.append(MAIN_WASM % (resx, resy))
 	else:
-		setup.append(MAIN)
+		setup.append(MAIN % (resx, resy))
+
 	setup.append('}')
 	draw.append('	raylib::end_drawing();')
 	draw.append('}')
@@ -266,6 +279,12 @@ class C3WorldPanel(bpy.types.Panel):
 	bl_context = "world"
 
 	def draw(self, context):
+		self.layout.prop(context.world, 'c3_export_res_x')
+		self.layout.prop(context.world, 'c3_export_res_y')
+		self.layout.prop(context.world, 'c3_export_scale')
+		self.layout.prop(context.world, 'c3_export_offset_x')
+		self.layout.prop(context.world, 'c3_export_offset_y')
+
 		self.layout.operator("c3.export_wasm", icon="CONSOLE")
 		self.layout.operator("c3.export", icon="CONSOLE")
 
@@ -293,6 +312,12 @@ def build_wasm():
 	SERVER_PROC = subprocess.Popen(cmd, cwd='/tmp')
 	atexit.register(lambda:SERVER_PROC.kill())
 	webbrowser.open('http://localhost:6969')
+
+bpy.types.World.c3_export_res_x = bpy.props.IntProperty(name="resolution X", default=800)
+bpy.types.World.c3_export_res_y = bpy.props.IntProperty(name="resolution Y", default=600)
+bpy.types.World.c3_export_scale = bpy.props.FloatProperty(name="scale", default=100)
+bpy.types.World.c3_export_offset_x = bpy.props.IntProperty(name="offset X", default=100)
+bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name="offset Y", default=100)
 
 
 bpy.types.Object.c3_script_init = bpy.props.PointerProperty(
@@ -336,14 +361,14 @@ class C3ScriptsPanel(bpy.types.Panel):
 EXAMPLE1 = '''
 self.velocity += GRAVITY*dt;
 float nx = self.position.x + self.velocity.x*dt;
-if (nx < 0 || nx + PLAYER_SIZE.x > raylib::get_screen_width()) {
+if (nx < 0 || nx + self.scale.x > raylib::get_screen_width()) {
 	self.velocity.x *= -COLLISION_DAMP;
 	self.color = raylib::color_from_hsv(360*((float)raylib::get_random_value(0, 100)/100.0), 1, 1);
 } else {
 	self.position.x = nx;
 }
 float ny = self.position.y + self.velocity.y*dt;
-if (ny < 0 || ny + PLAYER_SIZE.y > raylib::get_screen_height()) {
+if (ny < 0 || ny + self.scale.y > raylib::get_screen_height()) {
 	self.velocity.y *= -COLLISION_DAMP;
 	self.color = raylib::color_from_hsv(360*((float)raylib::get_random_value(0, 100)/100.0), 1, 1);
 } else {
@@ -353,18 +378,21 @@ if (ny < 0 || ny + PLAYER_SIZE.y > raylib::get_screen_height()) {
 
 EXAMPLE2 = '''
 self.position.x += self.myprop;
-if (self.position.x >= 400) self.position.x = 0;
+if (self.position.x >= raylib::get_screen_width()) self.position.x = 0;
 '''
 
 
 def gen_test_scene():
 	ob = bpy.data.objects['Cube']
+	ob.scale.z += random()
 	txt = bpy.data.texts.new(name='example1.c3')
 	txt.from_string(EXAMPLE1)
 	ob.c3_script0 = txt
 
 	bpy.ops.object.gpencil_add(type='MONKEY')
-	bpy.context.active_object.location.x += 2
+	ob = bpy.context.active_object
+	ob.location.x += 2
+	ob.scale.z += random()
 
 	bpy.ops.mesh.primitive_circle_add(fill_type="NGON")
 	ob = bpy.context.active_object
@@ -376,4 +404,4 @@ def gen_test_scene():
 	ob['myprop'] = 1.0
 
 gen_test_scene()
-build_wasm()
+#build_wasm()
