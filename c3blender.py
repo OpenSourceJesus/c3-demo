@@ -59,7 +59,10 @@ def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True):
 		cmd += ['-l', 'glfw']
 
 	if opt:
-		cmd.append('-Oz')
+		if type(opt) is str:
+			cmd.append('-'+opt)
+		else:
+			cmd.append('-Oz')
 
 	cmd += [mode, input, './raylib.c3']
 	print(cmd)
@@ -284,6 +287,7 @@ class C3WorldPanel(bpy.types.Panel):
 		self.layout.prop(context.world, 'c3_export_scale')
 		self.layout.prop(context.world, 'c3_export_offset_x')
 		self.layout.prop(context.world, 'c3_export_offset_y')
+		self.layout.prop(context.world, 'c3_export_opt')
 
 		self.layout.operator("c3.export_wasm", icon="CONSOLE")
 		self.layout.operator("c3.export", icon="CONSOLE")
@@ -294,7 +298,7 @@ def build_linux():
 	print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
-	bin = build(input=tmp)
+	bin = build(input=tmp, opt=bpy.context.world.c3_export_opt)
 
 SERVER_PROC = None
 def build_wasm():
@@ -305,7 +309,7 @@ def build_wasm():
 	print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
-	wasm = build(input=tmp, wasm=True)
+	wasm = build(input=tmp, wasm=True, opt=bpy.context.world.c3_export_opt)
 	os.system('cp -v ./index.html /tmp/.')
 	os.system('cp -v ./raylib.js /tmp/.')
 	cmd = ['python', '-m', 'http.server', '6969']
@@ -318,7 +322,19 @@ bpy.types.World.c3_export_res_y = bpy.props.IntProperty(name="resolution Y", def
 bpy.types.World.c3_export_scale = bpy.props.FloatProperty(name="scale", default=100)
 bpy.types.World.c3_export_offset_x = bpy.props.IntProperty(name="offset X", default=100)
 bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name="offset Y", default=100)
-
+bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
+	name='optimize',
+	items=[
+		("O0", "O0", "Safe, no optimizations, emit debug info."), 
+		("O1", "O1", "Safe, high optimization, emit debug info."), 
+		("O2", "O2", "Unsafe, high optimization, emit debug info."), 
+		("O3", "O3", "Unsafe, high optimization, single module, emit debug info."), 
+		("O4", "O4", "Unsafe, highest optimization, relaxed maths, single module, emit debug info, no panic messages."),
+		("O5", "O5", "Unsafe, highest optimization, fast maths, single module, emit debug info, no panic messages, no backtrace."),
+		("Os", "Os", "Unsafe, high optimization, small code, single module, no debug info, no panic messages."),
+		("Oz", "Oz", "Unsafe, high optimization, tiny code, single module, no debug info, no panic messages, no backtrace."),
+	]
+)
 
 bpy.types.Object.c3_script_init = bpy.props.PointerProperty(
 	name="script init", type=bpy.types.Text
