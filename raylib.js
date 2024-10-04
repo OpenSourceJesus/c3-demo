@@ -160,6 +160,18 @@ class RaylibJs {
         this.ctx.stroke();
     }
 
+    DrawCircleWASM(x, y, radius, color_ptr) {
+        const buffer = this.wasm.instance.exports.memory.buffer;
+        const [r, g, b, a] = new Uint8Array(buffer, color_ptr, 4);
+        const color = color_hex_unpacked(r, g, b, a);
+        this.ctx.strokeStyle = 'black';
+        this.ctx.beginPath();
+        this.ctx.arc(x, y, radius, 0, 2*Math.PI, false);
+        this.ctx.fillStyle = color;
+        this.ctx.closePath();
+        this.ctx.stroke();
+    }
+
     DrawCircleV(center_ptr, radius, color_ptr) {
         if (center_ptr % 4) {
             console.log('DrawCircleV: invalid buffer offset:', center_ptr);
