@@ -146,6 +146,8 @@ def safename(ob):
 
 def blender_to_c3(wasm=False):
 	head  = [HEADER]
+	if wasm:
+		head.append('extern fn void draw_circle_wasm(int x, int y, float radius, Color color) @extern("DrawCircleWASM");')
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
 		'fn void game_frame() @wasm {',
@@ -193,7 +195,10 @@ def blender_to_c3(wasm=False):
 				draw.append('	objects[%s] = self;' % idx)
 
 			if is_maybe_circle(ob):
-				draw.append('	raylib::draw_circle_v(self.position, PLAYER_SIZE.x, self.color);')
+				if wasm:
+					draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, PLAYER_SIZE.x, self.color);')
+				else:
+					draw.append('	raylib::draw_circle_v(self.position, PLAYER_SIZE.x, self.color);')
 			else:
 				draw.append('	raylib::draw_rectangle_v(self.position, PLAYER_SIZE, self.color);')
 		elif ob.type=='GPENCIL':
@@ -371,3 +376,4 @@ def gen_test_scene():
 	ob['myprop'] = 1.0
 
 gen_test_scene()
+build_wasm()
