@@ -40,8 +40,8 @@ def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True):
 	cmd = [C3]
 	if wasm:
 		cmd += ['--target', 'wasm32']
-		if os.path.isfile('./emsdk/upstream/bin/wasm-ld'):
-			cmd += ['--linker=custom', './emsdk/upstream/bin/wasm-ld']
+		#if os.path.isfile('./emsdk/upstream/bin/wasm-ld'):
+		#	cmd += ['--linker=custom', './emsdk/upstream/bin/wasm-ld']
 	else:
 		cmd += ['--target', 'linux-x64', '-l', './raylib-5.0_linux_amd64/lib/libraylib.a']
 	mode = 'compile'
@@ -54,7 +54,7 @@ def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True):
 		'-o', output,
 	]
 	if wasm:
-		cmd += [#'--link-libc=no', '--use-stdlib=no', 
+		cmd += ['--link-libc=no', '--use-stdlib=no', 
 			'--no-entry', '--reloc=none', '-z', '--export-table']
 	else:
 		cmd += ['-l', 'glfw']
@@ -119,18 +119,20 @@ struct Object {
 }
 '''
 
-MAIN = '''
+MAIN_WASM = '''
 	raylib::init_window(800, 600, "Hello, from C3 WebAssembly");
 	raylib::set_target_fps(60);
+	raylib_js_set_entry(&game_frame);
 
-	$if $feature(PLATFORM_WEB):
-		raylib_js_set_entry(&game_frame);
-	$else
-		while (!raylib::window_should_close()) {
-			game_frame();
-		}
-		raylib::close_window();
-	$endif
+'''
+
+MAIN = '''
+	raylib::init_window(800, 600, "Hello, from C3");
+	raylib::set_target_fps(60);
+	while (!raylib::window_should_close()) {
+		game_frame();
+	}
+	raylib::close_window();
 '''
 
 def is_maybe_circle(ob):
@@ -142,7 +144,7 @@ def is_maybe_circle(ob):
 def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
-def blender_to_c3():
+def blender_to_c3(wasm=False):
 	head  = [HEADER]
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
@@ -215,8 +217,10 @@ def blender_to_c3():
 				n = len(stroke.points)
 				draw.append('	raylib::draw_spline(&__%s__%s, %s, 2.0, raylib::color_from_hsv(0,1,0.5));' % (dname, sidx, n))
 
-
-	setup.append(MAIN)
+	if wasm:
+		setup.append(MAIN_WASM)
+	else:
+		setup.append(MAIN)
 	setup.append('}')
 	draw.append('	raylib::end_drawing();')
 	draw.append('}')
@@ -272,7 +276,7 @@ SERVER_PROC = None
 def build_wasm():
 	global SERVER_PROC
 	if SERVER_PROC: SERVER_PROC.kill()
-	o = blender_to_c3()
+	o = blender_to_c3(wasm=True)
 	o = '\n'.join(o)
 	print(o)
 	tmp = '/tmp/c3blender.c3'
@@ -349,12 +353,13 @@ if (self.position.x >= 400) self.position.x = 0;
 
 
 def gen_test_scene():
-	bpy.ops.object.gpencil_add(type='MONKEY')
-	bpy.context.active_object.location.x += 2
 	ob = bpy.data.objects['Cube']
 	txt = bpy.data.texts.new(name='example1.c3')
 	txt.from_string(EXAMPLE1)
 	ob.c3_script0 = txt
+
+	bpy.ops.object.gpencil_add(type='MONKEY')
+	bpy.context.active_object.location.x += 2
 
 	bpy.ops.mesh.primitive_circle_add(fill_type="NGON")
 	ob = bpy.context.active_object
@@ -366,4 +371,3 @@ def gen_test_scene():
 	ob['myprop'] = 1.0
 
 gen_test_scene()
-#build_wasm()
