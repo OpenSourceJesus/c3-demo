@@ -158,6 +158,7 @@ def blender_to_c3(wasm=False):
 	head  = [HEADER]
 	if wasm:
 		head.append('extern fn void draw_circle_wasm(int x, int y, float radius, Color color) @extern("DrawCircleWASM");')
+		head.append('extern fn void draw_spline_wasm(Vector2 *points, int pointCount, float thick, int use_fill, float r, float g, float b, float a) @extern("DrawSplineLinearWASM");')
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
 		'fn void game_frame() @wasm {',
@@ -221,21 +222,32 @@ def blender_to_c3(wasm=False):
 			if dname not in datas:
 				datas[dname]=1
 				data = []
-				for sidx, stroke in enumerate( ob.data.layers[0].frames[0].strokes ):
-					data.append('Vector2[%s] __%s__%s = {' % (len(stroke.points),dname, sidx ))
-					s = []
-					for pnt in stroke.points:
-						x1,y1,z1 = pnt.co
-						x1 *= sx
-						z1 *= sz
-						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-					data.append('\t' + ','.join(s))
-					data.append('};')
+				for lidx, layer in enumerate( ob.data.layers ):
+					for sidx, stroke in enumerate( layer.frames[0].strokes ):
+						data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
+						s = []
+						for pnt in stroke.points:
+							x1,y1,z1 = pnt.co
+							x1 *= sx
+							z1 *= sz
+							s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+						data.append('\t' + ','.join(s))
+						data.append('};')
 				head += data
+			for lidx, layer in enumerate( ob.data.layers ):
+				for sidx, stroke in enumerate( layer.frames[0].strokes ):
+					n = len(stroke.points)
+					mat = ob.data.materials[stroke.material_index]
+					use_fill = 0
+					if mat.grease_pencil.show_fill: use_fill = 1
+					r,g,b,a = mat.grease_pencil.fill_color
 
-			for sidx, stroke in enumerate( ob.data.layers[0].frames[0].strokes ):
-				n = len(stroke.points)
-				draw.append('	raylib::draw_spline(&__%s__%s, %s, 2.0, raylib::color_from_hsv(0,1,0.5));' % (dname, sidx, n))
+					if wasm:
+						draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, 2.0, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, use_fill, r,g,b,a))
+					else:
+						if use_fill:
+							draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, raylib::color_from_hsv(0,1,0.5));' % (dname, lidx, sidx, n))
+						draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, 2.0, raylib::color_from_hsv(0,1,0.5));' % (dname, lidx, sidx, n))
 
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
@@ -420,4 +432,3 @@ def gen_test_scene():
 	ob['myprop'] = 1.0
 
 gen_test_scene()
-#build_wasm()
