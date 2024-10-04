@@ -144,6 +144,24 @@ class RaylibJs {
         this.currentMouseWheelMoveState = 0.0;
     }
 
+    DrawSplineLinearWASM(points_ptr, pointCount, thick, fill, r,g,b,a){
+        const buffer = this.wasm.instance.exports.memory.buffer;
+        const points = new Float32Array(buffer, points_ptr, pointCount*2);
+        this.ctx.strokeStyle = 'black';
+        if (fill) this.ctx.fillStyle = 'rgba('+(r*255)+','+(g*255)+','+(b*255)+',' + a + ')';
+        this.ctx.lineWidth = thick;
+        this.ctx.beginPath();
+        this.ctx.moveTo(points[0], points[1]);
+        for (var i=2; i<points.length; i+=2){
+            this.ctx.lineTo(points[i], points[i+1]);
+        }
+        if (fill){
+            this.ctx.closePath();
+            this.ctx.fill();
+        }
+        this.ctx.stroke();
+    }
+    
     DrawSplineLinear(points_ptr, pointCount, thick, color_ptr){
         const buffer = this.wasm.instance.exports.memory.buffer;
         const points = new Float32Array(buffer, points_ptr, pointCount*2);
