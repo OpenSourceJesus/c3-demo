@@ -144,7 +144,27 @@ class RaylibJs {
         this.currentMouseWheelMoveState = 0.0;
     }
 
+    DrawSplineLinear(points_ptr, pointCount, thick, color_ptr){
+        const buffer = this.wasm.instance.exports.memory.buffer;
+        const points = new Float32Array(buffer, points_ptr, pointCount*2);
+        const [r, g, b, a] = new Uint8Array(buffer, color_ptr, 4);
+        const color = color_hex_unpacked(r, g, b, a);
+        this.ctx.strokeStyle = 'black';
+        this.ctx.lineWidth = thick;
+        this.ctx.beginPath();
+        this.ctx.moveTo(points[0], points[1]);
+        for (var i=2; i<points.length; i+=2){
+            this.ctx.lineTo(points[i], points[i+1]);
+        }
+        this.ctx.closePath();
+        this.ctx.stroke();
+    }
+
     DrawCircleV(center_ptr, radius, color_ptr) {
+        if (center_ptr % 4) {
+            console.log('DrawCircleV: invalid buffer offset:', center_ptr);
+            return;
+        }
         const buffer = this.wasm.instance.exports.memory.buffer;
         const [x, y] = new Float32Array(buffer, center_ptr, 2);
         const [r, g, b, a] = new Uint8Array(buffer, color_ptr, 4);
@@ -152,6 +172,7 @@ class RaylibJs {
         this.ctx.beginPath();
         this.ctx.arc(x, y, radius, 0, 2*Math.PI, false);
         this.ctx.fillStyle = color;
+        this.ctx.closePath();
         this.ctx.fill();
     }
 
