@@ -227,7 +227,7 @@ def blender_to_c3(wasm=False):
 						mat = ob.data.materials[stroke.material_index]
 						use_fill = mat.grease_pencil.show_fill
 						s = []
-
+						tri_strip = False
 						if use_fill and not wasm:
 							if mat.c3_export_trifan:
 								x1,y1,z1 = calc_center(stroke.points)
@@ -235,6 +235,9 @@ def blender_to_c3(wasm=False):
 								z1 *= sz
 								s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
 								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points)+1,dname, lidx, sidx ))
+							elif mat.c3_export_tristrip:
+								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
+								tri_strip = True
 							else:
 								tris = []
 								for tri in stroke.triangles:
@@ -246,11 +249,34 @@ def blender_to_c3(wasm=False):
 								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
 						else:
 							data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
-						for pnt in stroke.points:
-							x1,y1,z1 = pnt.co
-							x1 *= sx
-							z1 *= sz
-							s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+
+						if tri_strip:
+							for tidx, tri in enumerate(stroke.triangles):
+								v1 = stroke.points[ tri.v1 ]
+								v2 = stroke.points[ tri.v2 ]
+								v3 = stroke.points[ tri.v3 ]
+								if tidx==0:
+									x1,y1,z1 = v1.co
+									x1 *= sx
+									z1 *= sz
+									s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+
+									x1,y1,z1 = v2.co
+									x1 *= sx
+									z1 *= sz
+									s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+
+								x1,y1,z1 = v3.co
+								x1 *= sx
+								z1 *= sz
+								s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+
+						else:
+							for pnt in stroke.points:
+								x1,y1,z1 = pnt.co
+								x1 *= sx
+								z1 *= sz
+								s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
 						data.append('\t' + ','.join(s))
 						data.append('};')
 				head += data
@@ -270,6 +296,8 @@ def blender_to_c3(wasm=False):
 							clr = '{%s,%s,%s,%s}' % (int(r*255), int(g*255), int(b*255), int(a*255))
 							if mat.c3_export_trifan:
 								draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n+1, clr))
+							elif mat.c3_export_tristrip:
+								draw.append('	raylib::draw_triangle_strip(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n+1, clr))
 							else:
 								draw += [
 									'	for (int i=0; i<%s; i+=3){' % (len(stroke.triangles)*3),
@@ -388,6 +416,7 @@ def build_wasm():
 	webbrowser.open('http://localhost:6969')
 
 bpy.types.Material.c3_export_trifan = bpy.props.BoolProperty(name="triangle fan")
+bpy.types.Material.c3_export_tristrip = bpy.props.BoolProperty(name="triangle strip")
 
 bpy.types.World.c3_export_res_x = bpy.props.IntProperty(name="resolution X", default=800)
 bpy.types.World.c3_export_res_y = bpy.props.IntProperty(name="resolution Y", default=600)
@@ -461,6 +490,7 @@ class C3MaterialPanel(bpy.types.Panel):
 		if not ob.data.materials: return
 		mat = ob.data.materials[ ob.active_material_index ]
 		self.layout.prop(mat, 'c3_export_trifan')
+		self.layout.prop(mat, 'c3_export_tristrip')
 
 
 EXAMPLE1 = '''
