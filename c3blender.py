@@ -306,14 +306,26 @@ def blender_to_c3(wasm=False):
 							else:
 								for pnt in stroke.points:
 									x1,y1,z1 = pnt.co
-									x1 *= sx
-									z1 *= sz
 									if gquant:
-										s.append('{%s,%s}' % ( int(x1), int(-z1) ))
+										q = SCALE * 0.5
+										s.append('{%s,%s}' % ( int(x1*q), int(-z1*q) ))
 									else:
+										x1 *= sx
+										z1 *= sz
 										s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
 						data.append('\t' + ','.join(s))
 						data.append('};')
+
+						if gquant:
+							sx,sy,sz = ob.scale
+							setup += [
+								'for (int i=0; i<%s; i++){' % len(stroke.points),
+								'	float a = (__%s__%s_%s_pak[i].x * %sf) + %sf;' %(dname, lidx, sidx, 2*sx, (offx+x) ),
+								'	__%s__%s_%s[i].x = a;' %(dname,lidx,sidx),
+								'	a = (__%s__%s_%s_pak[i].y * %sf) + %sf;' %(dname, lidx, sidx, 2*sz, (offy+z) ),
+								'	__%s__%s_%s[i].y = a;' %(dname,lidx,sidx),
+								'}',
+							]
 				head += data
 			for lidx, layer in enumerate( ob.data.layers ):
 				for sidx, stroke in enumerate( layer.frames[0].strokes ):
@@ -595,7 +607,7 @@ def gen_test_scene():
 	bpy.ops.object.gpencil_add(type='MONKEY')
 	ob = bpy.context.active_object
 	#ob.c3_grease_optimize=2  ## not working yet, TODO use modifier instead
-	#ob.c3_grease_quantize="16bits"  ## TODO
+	ob.c3_grease_quantize="16bits"  ## TODO
 	ob.location.x += 2
 	ob.scale.z += random()
 	for mat in ob.data.materials:
