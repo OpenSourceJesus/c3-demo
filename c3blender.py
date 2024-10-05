@@ -271,8 +271,17 @@ def blender_to_c3(wasm=False):
 							if mat.c3_export_trifan:
 								draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n+1, clr))
 							else:
-								## TODO draw triangle
-								pass
+								draw += [
+									'	for (int i=0; i<%s; i+=3){' % (len(stroke.triangles)*3),
+									'		int idx = __%s__%s_%s_tris[i+2];' %(dname, lidx, sidx),
+									'		Vector2 v1 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
+									'		idx = __%s__%s_%s_tris[i+1];'   %(dname, lidx, sidx),
+									'		Vector2 v2 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
+									'		idx = __%s__%s_%s_tris[i+0];'   %(dname, lidx, sidx),
+									'		Vector2 v3 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
+									'		raylib::draw_triangle(v1,v2,v3, %s);' % clr,
+									'}',
+								]
 
 							if mat.grease_pencil.show_stroke:
 								draw.append('	raylib::draw_spline( (&__%s__%s_%s), %s, 4.0, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n))
