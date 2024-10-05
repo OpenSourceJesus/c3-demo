@@ -224,8 +224,28 @@ def blender_to_c3(wasm=False):
 				data = []
 				for lidx, layer in enumerate( ob.data.layers ):
 					for sidx, stroke in enumerate( layer.frames[0].strokes ):
-						data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
+						mat = ob.data.materials[stroke.material_index]
+						use_fill = mat.grease_pencil.show_fill
 						s = []
+
+						if use_fill and not wasm:
+							if mat.c3_export_trifan:
+								x1,y1,z1 = calc_center(stroke.points)
+								x1 *= sx
+								z1 *= sz
+								s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points)+1,dname, lidx, sidx ))
+							else:
+								tris = []
+								for tri in stroke.triangles:
+									tris.append(tri.v1)
+									tris.append(tri.v2)
+									tris.append(tri.v3)
+								tris = ','.join([str(vidx) for vidx in tris])
+								data.append('int[%s] __%s__%s_%s_tris = {%s};' % (len(stroke.triangles)*3,dname, lidx, sidx, tris ))
+								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
+						else:
+							data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
 						for pnt in stroke.points:
 							x1,y1,z1 = pnt.co
 							x1 *= sx
@@ -241,13 +261,23 @@ def blender_to_c3(wasm=False):
 					use_fill = 0
 					if mat.grease_pencil.show_fill: use_fill = 1
 					r,g,b,a = mat.grease_pencil.fill_color
+					swidth = calc_stroke_width(stroke)
 
 					if wasm:
-						draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, 2.0, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, use_fill, r,g,b,a))
+						draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, swidth, use_fill, r,g,b,a))
 					else:
 						if use_fill:
-							draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, raylib::color_from_hsv(0,1,0.5));' % (dname, lidx, sidx, n))
-						draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, 2.0, raylib::color_from_hsv(0,1,0.5));' % (dname, lidx, sidx, n))
+							clr = '{%s,%s,%s,%s}' % (int(r*255), int(g*255), int(b*255), int(a*255))
+							if mat.c3_export_trifan:
+								draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n+1, clr))
+							else:
+								## TODO draw triangle
+								pass
+
+							if mat.grease_pencil.show_stroke:
+								draw.append('	raylib::draw_spline( (&__%s__%s_%s), %s, 4.0, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n))
+						else:
+							draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, %s, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n, swidth))
 
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
@@ -262,6 +292,25 @@ def blender_to_c3(wasm=False):
 
 	return head + setup + draw
 
+def calc_stroke_width(stroke):
+	sw = 0.0
+	for p in stroke.points:
+		sw += p.pressure
+		#sw += p.strength
+	sw /= len(stroke.points)
+	return sw * 4
+
+
+def calc_center(points):
+	ax = ay = az = 0.0
+	for p in points:
+		ax += p.co.x
+		ay += p.co.y
+		az += p.co.z
+	ax /= len(points)
+	ay /= len(points)
+	az /= len(points)
+	return (ax,ay,az)
 
 @bpy.utils.register_class
 class C3Export(bpy.types.Operator):
@@ -329,6 +378,8 @@ def build_wasm():
 	atexit.register(lambda:SERVER_PROC.kill())
 	webbrowser.open('http://localhost:6969')
 
+bpy.types.Material.c3_export_trifan = bpy.props.BoolProperty(name="triangle fan")
+
 bpy.types.World.c3_export_res_x = bpy.props.IntProperty(name="resolution X", default=800)
 bpy.types.World.c3_export_res_y = bpy.props.IntProperty(name="resolution Y", default=600)
 bpy.types.World.c3_export_scale = bpy.props.FloatProperty(name="scale", default=100)
@@ -386,6 +437,23 @@ class C3ScriptsPanel(bpy.types.Panel):
 				foundUnassignedScript = not hasProperty
 
 
+@bpy.utils.register_class
+class C3MaterialPanel(bpy.types.Panel):
+	bl_idname = "OBJECT_PT_C3_Material_Panel"
+	bl_label = "C3 Material Settings"
+	bl_space_type = "PROPERTIES"
+	bl_region_type = "WINDOW"
+	bl_context = "material"
+
+	def draw(self, context):
+		if not context.active_object: return
+		ob = context.active_object
+		if not ob.type=='GPENCIL': return
+		if not ob.data.materials: return
+		mat = ob.data.materials[ ob.active_material_index ]
+		self.layout.prop(mat, 'c3_export_trifan')
+
+
 EXAMPLE1 = '''
 self.velocity += GRAVITY*dt;
 float nx = self.position.x + self.velocity.x*dt;
@@ -421,6 +489,9 @@ def gen_test_scene():
 	ob = bpy.context.active_object
 	ob.location.x += 2
 	ob.scale.z += random()
+	for mat in ob.data.materials:
+		if mat.name=='Skin': continue
+		mat.c3_export_trifan = True
 
 	bpy.ops.mesh.primitive_circle_add(fill_type="NGON")
 	ob = bpy.context.active_object
