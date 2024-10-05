@@ -121,6 +121,17 @@ struct Object {
 	Vector2 scale;
 	Color color;
 }
+
+struct Vector2_8BITS {
+	ichar x;
+	ichar y;
+}
+
+struct Vector2_16BITS {
+	short x;
+	short y;
+}
+
 '''
 
 MAIN_WASM = '''
@@ -228,6 +239,8 @@ def blender_to_c3(wasm=False):
 						use_fill = mat.grease_pencil.show_fill
 						s = []
 						tri_strip = False
+						gopt = False
+						gquant = False
 						if use_fill and not wasm:
 							if mat.c3_export_trifan:
 								x1,y1,z1 = calc_center(stroke.points)
@@ -247,8 +260,19 @@ def blender_to_c3(wasm=False):
 								tris = ','.join([str(vidx) for vidx in tris])
 								data.append('int[%s] __%s__%s_%s_tris = {%s};' % (len(stroke.triangles)*3,dname, lidx, sidx, tris ))
 								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
+						elif not use_fill and ob.c3_grease_optimize and not len(stroke.points)%2:
+							data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points)//2,dname, lidx, sidx ))
+							gopt = True
 						else:
-							data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
+							if ob.c3_grease_quantize in ('8bits', '16bits'):
+								data.append('Vector2[%s] __%s__%s_%s;' % (len(stroke.points),dname, lidx, sidx ))
+								if ob.c3_grease_quantize == '8bits':
+									data.append('Vector2_8BITS[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
+								else:
+									data.append('Vector2_16BITS[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
+								gquant = True
+							else:
+								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
 
 						if tri_strip:
 							for tidx, tri in enumerate(stroke.triangles):
@@ -272,11 +296,22 @@ def blender_to_c3(wasm=False):
 								s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
 
 						else:
-							for pnt in stroke.points:
-								x1,y1,z1 = pnt.co
-								x1 *= sx
-								z1 *= sz
-								s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+							if gopt:
+								for pidx in range(0, len(stroke.points), 2):
+									pnt = stroke.points[pidx]
+									x1,y1,z1 = pnt.co
+									x1 *= sx
+									z1 *= sz
+									s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+							else:
+								for pnt in stroke.points:
+									x1,y1,z1 = pnt.co
+									x1 *= sx
+									z1 *= sz
+									if gquant:
+										s.append('{%s,%s}' % ( int(x1), int(-z1) ))
+									else:
+										s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
 						data.append('\t' + ','.join(s))
 						data.append('};')
 				head += data
@@ -349,6 +384,12 @@ def calc_center(points):
 	az /= len(points)
 	return (ax,ay,az)
 
+_BUILD_INFO = {
+	'native': None,
+	'wasm'  : None,
+	'native-size':None,
+	'wasm-size':None,
+}
 @bpy.utils.register_class
 class C3Export(bpy.types.Operator):
 	bl_idname = "c3.export"
@@ -357,7 +398,9 @@ class C3Export(bpy.types.Operator):
 	def poll(cls, context):
 		return True
 	def execute(self, context):
-		build_linux()
+		exe = build_linux()
+		_BUILD_INFO['native']=exe
+		_BUILD_INFO['native-size']=len(open(exe,'rb').read())
 		return {"FINISHED"}
 
 @bpy.utils.register_class
@@ -368,7 +411,9 @@ class C3Export(bpy.types.Operator):
 	def poll(cls, context):
 		return True
 	def execute(self, context):
-		build_wasm()
+		exe = build_wasm()
+		_BUILD_INFO['wasm']=exe
+		_BUILD_INFO['wasm-size']=len(open(exe,'rb').read())
 		return {"FINISHED"}
 
 @bpy.utils.register_class
@@ -388,7 +433,14 @@ class C3WorldPanel(bpy.types.Panel):
 		self.layout.prop(context.world, 'c3_export_opt')
 
 		self.layout.operator("c3.export_wasm", icon="CONSOLE")
+		if _BUILD_INFO['wasm-size']:
+			if _BUILD_INFO['wasm-size'] < 1024*16:
+				self.layout.label(text="wasm bytes=%s" %( _BUILD_INFO['wasm-size'] ))
+			else:
+				self.layout.label(text="wasm KB=%s" %( _BUILD_INFO['wasm-size']//1024 ))
 		self.layout.operator("c3.export", icon="CONSOLE")
+		if _BUILD_INFO['native-size']:
+			self.layout.label(text="exe KB=%s" %( _BUILD_INFO['native-size']//1024 ))
 
 def build_linux():
 	o = blender_to_c3()
@@ -397,6 +449,7 @@ def build_linux():
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
 	bin = build(input=tmp, opt=bpy.context.world.c3_export_opt)
+	return bin
 
 SERVER_PROC = None
 def build_wasm():
@@ -414,6 +467,7 @@ def build_wasm():
 	SERVER_PROC = subprocess.Popen(cmd, cwd='/tmp')
 	atexit.register(lambda:SERVER_PROC.kill())
 	webbrowser.open('http://localhost:6969')
+	return wasm
 
 bpy.types.Material.c3_export_trifan = bpy.props.BoolProperty(name="triangle fan")
 bpy.types.Material.c3_export_tristrip = bpy.props.BoolProperty(name="triangle strip")
@@ -437,6 +491,17 @@ bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
 	]
 )
 
+bpy.types.Object.c3_grease_optimize = bpy.props.IntProperty(name="grease pencil optimize")
+bpy.types.Object.c3_grease_quantize = bpy.props.EnumProperty(
+	name='quantize',
+	items=[
+		("32bits", "32bits", "32bit vertices"), 
+		("16bits", "16bits", "16bit vertices"), 
+		("8bits", "8bits", "8bit vertices"), 
+	]
+)
+
+
 bpy.types.Object.c3_script_init = bpy.props.PointerProperty(
 	name="script init", type=bpy.types.Text
 )
@@ -453,24 +518,27 @@ for i in range(MAX_SCRIPTS_PER_OBJECT):
 @bpy.utils.register_class
 class C3ScriptsPanel(bpy.types.Panel):
 	bl_idname = "OBJECT_PT_C3_Scripts_Panel"
-	bl_label = "C3 Scripts"
+	bl_label = "C3 Object Options"
 	bl_space_type = "PROPERTIES"
 	bl_region_type = "WINDOW"
 	bl_context = "object"
 
 	def draw(self, context):
-		if not context.active_object:
-			return
-		self.layout.label(text="Attach C3 Scripts")
-		self.layout.prop(context.active_object, "c3_script_init")
+		if not context.active_object: return
+		ob = context.active_object
+		if ob.type=='GPENCIL':
+			self.layout.prop(ob, 'c3_grease_optimize')
+			self.layout.prop(ob, 'c3_grease_quantize')
 
+		self.layout.label(text="Attach C3 Scripts")
+		self.layout.prop(ob, "c3_script_init")
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			hasProperty = (
-				getattr(context.active_object, "c3_script" + str(i)) != None
+				getattr(ob, "c3_script" + str(i)) != None
 			)
 			if hasProperty or not foundUnassignedScript:
-				self.layout.prop(context.active_object, "c3_script" + str(i))
+				self.layout.prop(ob, "c3_script" + str(i))
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 
@@ -526,6 +594,8 @@ def gen_test_scene():
 
 	bpy.ops.object.gpencil_add(type='MONKEY')
 	ob = bpy.context.active_object
+	#ob.c3_grease_optimize=2  ## not working yet, TODO use modifier instead
+	#ob.c3_grease_quantize="16bits"  ## TODO
 	ob.location.x += 2
 	ob.scale.z += random()
 	for mat in ob.data.materials:
