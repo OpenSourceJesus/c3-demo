@@ -122,17 +122,33 @@ struct Object {
 	Color color;
 }
 
-struct Vector2_8BITS {
+bitstruct Vector2_4bits : ichar {
+	ichar x : 4..7;
+	ichar y : 0..3;
+}
+
+struct Vector2_8bits {
 	ichar x;
 	ichar y;
 }
 
-struct Vector2_16BITS {
+struct Vector2_16bits {
 	short x;
 	short y;
 }
 
+
 '''
+
+#fn void _unpacker_16bits(Vector2_16BITS *pak, Vector2 *out, int len, float sx, float sy, float offx, float offy){
+#	for (int i=0; i<len; i++){
+#		float a = (pak[i].x * sx) + offx;
+#		out[i].x = a;
+#		a = (pak[i].y * sy) + offy;
+#		out[i].y = a;
+#	}
+#}
+
 
 MAIN_WASM = '''
 	raylib::init_window(%s, %s, "Hello, from C3 WebAssembly");
@@ -166,6 +182,7 @@ def blender_to_c3(wasm=False):
 	offx = bpy.context.world.c3_export_offset_x
 	offy = bpy.context.world.c3_export_offset_y
 
+	unpackers = {}
 	head  = [HEADER]
 	if wasm:
 		head.append('extern fn void draw_circle_wasm(int x, int y, float radius, Color color) @extern("DrawCircleWASM");')
@@ -231,10 +248,11 @@ def blender_to_c3(wasm=False):
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			dname = safename(ob.data)
 			if dname not in datas:
-				datas[dname]=1
+				datas[dname]=0
 				data = []
 				for lidx, layer in enumerate( ob.data.layers ):
 					for sidx, stroke in enumerate( layer.frames[0].strokes ):
+						datas[dname] += len(stroke.points)
 						mat = ob.data.materials[stroke.material_index]
 						use_fill = mat.grease_pencil.show_fill
 						s = []
@@ -264,13 +282,15 @@ def blender_to_c3(wasm=False):
 							data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points)//2,dname, lidx, sidx ))
 							gopt = True
 						else:
-							if ob.c3_grease_quantize in ('8bits', '16bits'):
+							if ob.c3_grease_quantize in ('4bits', '8bits', '16bits'):
 								data.append('Vector2[%s] __%s__%s_%s;' % (len(stroke.points),dname, lidx, sidx ))
-								if ob.c3_grease_quantize == '8bits':
-									data.append('Vector2_8BITS[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
+								if ob.c3_grease_quantize == '4bits':
+									data.append('Vector2_4bits[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
+								elif ob.c3_grease_quantize == '8bits':
+									data.append('Vector2_8bits[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
 								else:
-									data.append('Vector2_16BITS[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
-								gquant = True
+									data.append('Vector2_16bits[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
+								gquant = ob.c3_grease_quantize
 							else:
 								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
 
@@ -307,7 +327,10 @@ def blender_to_c3(wasm=False):
 								for pnt in stroke.points:
 									x1,y1,z1 = pnt.co
 									if gquant:
-										q = SCALE * 0.5
+										if gquant=='4bits':
+											q = SCALE * 0.125
+										else:
+											q = SCALE * 0.5
 										s.append('{%s,%s}' % ( int(x1*q), int(-z1*q) ))
 									else:
 										x1 *= sx
@@ -318,14 +341,46 @@ def blender_to_c3(wasm=False):
 
 						if gquant:
 							sx,sy,sz = ob.scale
-							setup += [
-								'for (int i=0; i<%s; i++){' % len(stroke.points),
-								'	float a = (__%s__%s_%s_pak[i].x * %sf) + %sf;' %(dname, lidx, sidx, 2*sx, (offx+x) ),
-								'	__%s__%s_%s[i].x = a;' %(dname,lidx,sidx),
-								'	a = (__%s__%s_%s_pak[i].y * %sf) + %sf;' %(dname, lidx, sidx, 2*sz, (offy+z) ),
-								'	__%s__%s_%s[i].y = a;' %(dname,lidx,sidx),
-								'}',
-							]
+							gkey = (dname, gquant)
+							if gkey not in unpackers:
+								unpackers[gkey] = [
+									'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len){' %gkey,
+									'	for (int i=0; i<len; i++){',
+									'		float a = (pak[i].x * %sf) + %sf;' %(2*sx, offx+x),
+									'		out[i].x = a;',
+									'		a = (pak[i].y * %sf) + %sf;' % (2*sz, offy+z),
+									'		out[i].y = a;',
+									'	}',
+									'}'
+								]
+							if 1:
+								setup += [
+									'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname,lidx,sidx),
+									'	&__%s__%s_%s,' %(dname,lidx,sidx),
+									'	%s,' % len(stroke.points),
+									');',
+								]
+							elif 0:
+								## only slightly smaller
+								setup += [
+									'_unpacker_%s(&__%s__%s_%s_pak,' %(gquant, dname,lidx,sidx),
+									'	&__%s__%s_%s,' %(dname,lidx,sidx),
+									'	%s,' % len(stroke.points),
+									'	%s,' % (2*sx),
+									'	%s,' % (2*sz),
+									'	%s,' % (offx+x),
+									'	%s,' % (offy+z),
+									');',
+								]
+							else:
+								setup += [
+									'for (int i=0; i<%s; i++){' % len(stroke.points),
+									'	float a = (__%s__%s_%s_pak[i].x * %sf) + %sf;' %(dname, lidx, sidx, 2*sx, (offx+x) ),
+									'	__%s__%s_%s[i].x = a;' %(dname,lidx,sidx),
+									'	a = (__%s__%s_%s_pak[i].y * %sf) + %sf;' %(dname, lidx, sidx, 2*sz, (offy+z) ),
+									'	__%s__%s_%s[i].y = a;' %(dname,lidx,sidx),
+									'}',
+								]
 				head += data
 			for lidx, layer in enumerate( ob.data.layers ):
 				for sidx, stroke in enumerate( layer.frames[0].strokes ):
@@ -373,7 +428,11 @@ def blender_to_c3(wasm=False):
 	draw.append('}')
 
 	head.append('Object[%s] objects;' % len(meshes))
+	if unpackers:
+		for gkey in unpackers:
+			head += unpackers[gkey]
 
+	print(datas)
 	return head + setup + draw
 
 def calc_stroke_width(stroke):
@@ -510,6 +569,7 @@ bpy.types.Object.c3_grease_quantize = bpy.props.EnumProperty(
 		("32bits", "32bits", "32bit vertices"), 
 		("16bits", "16bits", "16bit vertices"), 
 		("8bits", "8bits", "8bit vertices"), 
+		("4bits", "4bits", "4bit vertices"), 
 	]
 )
 
@@ -607,7 +667,9 @@ def gen_test_scene():
 	bpy.ops.object.gpencil_add(type='MONKEY')
 	ob = bpy.context.active_object
 	#ob.c3_grease_optimize=2  ## not working yet, TODO use modifier instead
-	ob.c3_grease_quantize="16bits"  ## TODO
+	#ob.c3_grease_quantize="16bits"
+	ob.c3_grease_quantize="4bits"
+
 	ob.location.x += 2
 	ob.scale.z += random()
 	for mat in ob.data.materials:
