@@ -127,12 +127,12 @@ bitstruct Vector2_4bits : ichar {
 	ichar y : 0..3;
 }
 
-struct Vector2_8bits {
+struct Vector2_8bits @packed {
 	ichar x;
 	ichar y;
 }
 
-struct Vector2_16bits {
+struct Vector2_16bits @packed {
 	short x;
 	short y;
 }
@@ -323,19 +323,50 @@ def blender_to_c3(wasm=False):
 									x1 *= sx
 									z1 *= sz
 									s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+							elif gquant:
+								if gquant=='4bits':
+									q = SCALE * 0.125
+									#q = SCALE * 0.25
+									qs = 8
+								elif gquant=='8bits':
+									q = SCALE * 0.5
+									qs = 2
+									#q = SCALE * 0.75
+									#qs = 1.333
+								else:
+									q = SCALE
+									qs = 1
+
+								x0,y0,z0 = stroke.points[0].co
+
+								for pnt in stroke.points:
+									x1,y1,z1 = pnt.co
+									dx = int( (x0-x1)*q )
+									dz = int( (z0-z1)*q )
+									if gquant=='4bits':
+										if dx > 7:
+											print('WARN: 4bit vertex clip x=', dx)
+											dx = 7
+										elif dx < -8:
+											print('WARN: 4bit vertex clip x=', dx)
+											dx = -8
+
+										if dz > 7:
+											print('WARN: 4bit vertex clip z=', dz)
+											dz = 7
+										elif dz < -8:
+											print('WARN: 4bit vertex clip z=', dz)
+											dz = -8
+
+									#s.append('{%s,%s}' % ( int(x1*q), int(-z1*q) ))
+									#s.append('{%s,%s}' % ( int(dx*q), int(dz*q) ))
+									s.append('{%s,%s}' % ( dx, dz ))
 							else:
 								for pnt in stroke.points:
 									x1,y1,z1 = pnt.co
-									if gquant:
-										if gquant=='4bits':
-											q = SCALE * 0.125
-										else:
-											q = SCALE * 0.5
-										s.append('{%s,%s}' % ( int(x1*q), int(-z1*q) ))
-									else:
-										x1 *= sx
-										z1 *= sz
-										s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+									x1 *= sx
+									z1 *= sz
+									s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
 						data.append('\t' + ','.join(s))
 						data.append('};')
 
@@ -343,21 +374,36 @@ def blender_to_c3(wasm=False):
 							sx,sy,sz = ob.scale
 							gkey = (dname, gquant)
 							if gkey not in unpackers:
-								unpackers[gkey] = [
-									'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len){' %gkey,
-									'	for (int i=0; i<len; i++){',
-									'		float a = (pak[i].x * %sf) + %sf;' %(2*sx, offx+x),
-									'		out[i].x = a;',
-									'		a = (pak[i].y * %sf) + %sf;' % (2*sz, offy+z),
-									'		out[i].y = a;',
-									'	}',
-									'}'
-								]
+								x0,y0,z0 = stroke.points[0].co
+								if 1:
+									unpackers[gkey] = [
+										'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
+										'	for (int i=0; i<len; i++){',
+										'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
+										'		out[i].x = a;',
+										'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
+										'		out[i].y = a;',
+										'	}',
+										'}'
+									]
+								else:
+									unpackers[gkey] = [
+										'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len){' %gkey,
+										'	for (int i=0; i<len; i++){',
+										'		float a = (pak[i].x * %sf) + %sf;' %(2*sx, offx+x),
+										'		out[i].x = a;',
+										'		a = (pak[i].y * %sf) + %sf;' % (2*sz, offy+z),
+										'		out[i].y = a;',
+										'	}',
+										'}'
+									]
+
 							if 1:
 								setup += [
 									'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname,lidx,sidx),
 									'	&__%s__%s_%s,' %(dname,lidx,sidx),
 									'	%s,' % len(stroke.points),
+									'	%s, %s' % (x0*q, z0*q),
 									');',
 								]
 							elif 0:
@@ -516,7 +562,7 @@ class C3WorldPanel(bpy.types.Panel):
 def build_linux():
 	o = blender_to_c3()
 	o = '\n'.join(o)
-	print(o)
+	#print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
 	bin = build(input=tmp, opt=bpy.context.world.c3_export_opt)
@@ -528,7 +574,7 @@ def build_wasm():
 	if SERVER_PROC: SERVER_PROC.kill()
 	o = blender_to_c3(wasm=True)
 	o = '\n'.join(o)
-	print(o)
+	#print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
 	wasm = build(input=tmp, wasm=True, opt=bpy.context.world.c3_export_opt)
@@ -668,7 +714,8 @@ def gen_test_scene():
 	ob = bpy.context.active_object
 	#ob.c3_grease_optimize=2  ## not working yet, TODO use modifier instead
 	#ob.c3_grease_quantize="16bits"
-	ob.c3_grease_quantize="4bits"
+	#ob.c3_grease_quantize="4bits"
+	ob.c3_grease_quantize="8bits"
 
 	ob.location.x += 2
 	ob.scale.z += random()
