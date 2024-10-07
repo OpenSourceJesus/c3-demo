@@ -496,9 +496,13 @@ def quantizer(points, quant, trim=True):
 
 		#s.append('{%s,%s}' % ( int(x1*q), int(-z1*q) ))
 		#s.append('{%s,%s}' % ( int(dx*q), int(dz*q) ))
-		if (dx==0 and dz==0) and trim:
-			continue
-		s.append('{%s,%s}' % ( dx, dz ))
+		vec = '{%s,%s}' % ( dx, dz )
+		if trim:
+			if (dx==0 and dz==0):
+				continue
+			elif s and s[-1] == vec:
+				continue
+		s.append(vec)
 
 	return {'q':q, 'qs':qs, 'points':s}
 
