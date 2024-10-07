@@ -270,6 +270,8 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 	if ob.c3_grease_quantize in ('4bits', '8bits', '16bits'):
 		gquant = ob.c3_grease_quantize
 
+	gopt = ob.c3_grease_optimize
+
 	if dname not in datas:
 		datas[dname]=0
 		data = []
@@ -279,9 +281,17 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 				mat = ob.data.materials[stroke.material_index]
 				use_fill = 0
 				if mat.grease_pencil.show_fill: use_fill = 1
+
+				if gopt:
+					points = []
+					for pidx in range(0, len(stroke.points), gopt):
+						points.append( stroke.points[pidx] )
+				else:
+					points = stroke.points
+
 				s = []
 				if gquant:
-					qstroke = quantizer(stroke.points, gquant)
+					qstroke = quantizer(points, gquant)
 					n = len(qstroke['points'])
 					if not len(qstroke['points']):
 						print('stroke quantized away:', stroke)
@@ -289,27 +299,28 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 					data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
 					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
 
-					x0,y0,z0 = stroke.points[0].co
+					x0,y0,z0 = points[0].co
 					q = qstroke['q']
 					qs = qstroke['qs']
 					setup += [
 						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname,lidx,sidx),
 						'	&__%s__%s_%s,' %(dname,lidx,sidx),
-						'	%s,' % len(stroke.points),
+						'	%s,' % n,
 						'	%s, %s' % (x0*q, z0*q),
 						');',
 					]
+					n += 1
 
 				else:
 					## default 32bit floats ##
 					s = []
-					for pnt in stroke.points:
+					for pnt in points:
 						x1,y1,z1 = pnt.co
 						x1 *= sx
 						z1 *= sz
 						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
 
-					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(stroke.points),dname, lidx, sidx, ','.join(s) ))
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(points),dname, lidx, sidx, ','.join(s) ))
 					n = len(s)
 
 				r,g,b,a = mat.grease_pencil.fill_color
@@ -323,11 +334,13 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 			gkey = (dname, gquant)
 			head += [
 				'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
+				'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
+				'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
 				'	for (int i=0; i<len; i++){',
 				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
-				'		out[i].x = a;',
+				'		out[i+1].x = a;',
 				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
-				'		out[i].y = a;',
+				'		out[i+1].y = a;',
 				'	}',
 				'}'
 			]
@@ -447,11 +460,13 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 			gkey = (dname, gquant)
 			head += [
 				'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
+				'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
+				'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
 				'	for (int i=0; i<len; i++){',
 				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
-				'		out[i].x = a;',
+				'		out[i+1].x = a;',
 				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
-				'		out[i].y = a;',
+				'		out[i+1].y = a;',
 				'	}',
 				'}'
 			]
@@ -634,7 +649,7 @@ bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
 	]
 )
 
-bpy.types.Object.c3_grease_optimize = bpy.props.IntProperty(name="grease pencil optimize")
+bpy.types.Object.c3_grease_optimize = bpy.props.IntProperty(name="grease pencil optimize", min=0, max=8)
 bpy.types.Object.c3_grease_quantize = bpy.props.EnumProperty(
 	name='quantize',
 	items=[
@@ -738,7 +753,7 @@ def gen_test_scene():
 
 	bpy.ops.object.gpencil_add(type='MONKEY')
 	ob = bpy.context.active_object
-	#ob.c3_grease_optimize=2  ## not working yet, TODO use modifier instead
+	ob.c3_grease_optimize=4  ## only works with WASM export
 	#ob.c3_grease_quantize="16bits"
 	#ob.c3_grease_quantize="4bits"
 	ob.c3_grease_quantize="8bits"
