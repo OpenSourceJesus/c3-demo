@@ -140,14 +140,6 @@ struct Vector2_16bits @packed {
 
 '''
 
-#fn void _unpacker_16bits(Vector2_16BITS *pak, Vector2 *out, int len, float sx, float sy, float offx, float offy){
-#	for (int i=0; i<len; i++){
-#		float a = (pak[i].x * sx) + offx;
-#		out[i].x = a;
-#		a = (pak[i].y * sy) + offy;
-#		out[i].y = a;
-#	}
-#}
 
 
 MAIN_WASM = '''
@@ -246,223 +238,10 @@ def blender_to_c3(wasm=False):
 		elif ob.type=='GPENCIL':
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
-			dname = safename(ob.data)
-			if dname not in datas:
-				datas[dname]=0
-				data = []
-				for lidx, layer in enumerate( ob.data.layers ):
-					for sidx, stroke in enumerate( layer.frames[0].strokes ):
-						datas[dname] += len(stroke.points)
-						mat = ob.data.materials[stroke.material_index]
-						use_fill = mat.grease_pencil.show_fill
-						s = []
-						tri_strip = False
-						gopt = False
-						gquant = False
-						if use_fill and not wasm:
-							if mat.c3_export_trifan:
-								x1,y1,z1 = calc_center(stroke.points)
-								x1 *= sx
-								z1 *= sz
-								s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points)+1,dname, lidx, sidx ))
-							elif mat.c3_export_tristrip:
-								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
-								tri_strip = True
-							else:
-								tris = []
-								for tri in stroke.triangles:
-									tris.append(tri.v1)
-									tris.append(tri.v2)
-									tris.append(tri.v3)
-								tris = ','.join([str(vidx) for vidx in tris])
-								data.append('int[%s] __%s__%s_%s_tris = {%s};' % (len(stroke.triangles)*3,dname, lidx, sidx, tris ))
-								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
-						elif not use_fill and ob.c3_grease_optimize and not len(stroke.points)%2:
-							data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points)//2,dname, lidx, sidx ))
-							gopt = True
-						else:
-							if ob.c3_grease_quantize in ('4bits', '8bits', '16bits'):
-								data.append('Vector2[%s] __%s__%s_%s;' % (len(stroke.points),dname, lidx, sidx ))
-								if ob.c3_grease_quantize == '4bits':
-									data.append('Vector2_4bits[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
-								elif ob.c3_grease_quantize == '8bits':
-									data.append('Vector2_8bits[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
-								else:
-									data.append('Vector2_16bits[%s] __%s__%s_%s_pak = {' % (len(stroke.points),dname, lidx, sidx ))
-								gquant = ob.c3_grease_quantize
-							else:
-								data.append('Vector2[%s] __%s__%s_%s = {' % (len(stroke.points),dname, lidx, sidx ))
-
-						if tri_strip:
-							for tidx, tri in enumerate(stroke.triangles):
-								v1 = stroke.points[ tri.v1 ]
-								v2 = stroke.points[ tri.v2 ]
-								v3 = stroke.points[ tri.v3 ]
-								if tidx==0:
-									x1,y1,z1 = v1.co
-									x1 *= sx
-									z1 *= sz
-									s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-
-									x1,y1,z1 = v2.co
-									x1 *= sx
-									z1 *= sz
-									s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-
-								x1,y1,z1 = v3.co
-								x1 *= sx
-								z1 *= sz
-								s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-
-						else:
-							if gopt:
-								for pidx in range(0, len(stroke.points), 2):
-									pnt = stroke.points[pidx]
-									x1,y1,z1 = pnt.co
-									x1 *= sx
-									z1 *= sz
-									s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-							elif gquant:
-								if gquant=='4bits':
-									q = SCALE * 0.125
-									#q = SCALE * 0.25
-									qs = 8
-								elif gquant=='8bits':
-									q = SCALE * 0.5
-									qs = 2
-									#q = SCALE * 0.75
-									#qs = 1.333
-								else:
-									q = SCALE
-									qs = 1
-
-								x0,y0,z0 = stroke.points[0].co
-
-								for pnt in stroke.points:
-									x1,y1,z1 = pnt.co
-									dx = int( (x0-x1)*q )
-									dz = int( (z0-z1)*q )
-									if gquant=='4bits':
-										if dx > 7:
-											print('WARN: 4bit vertex clip x=', dx)
-											dx = 7
-										elif dx < -8:
-											print('WARN: 4bit vertex clip x=', dx)
-											dx = -8
-
-										if dz > 7:
-											print('WARN: 4bit vertex clip z=', dz)
-											dz = 7
-										elif dz < -8:
-											print('WARN: 4bit vertex clip z=', dz)
-											dz = -8
-
-									#s.append('{%s,%s}' % ( int(x1*q), int(-z1*q) ))
-									#s.append('{%s,%s}' % ( int(dx*q), int(dz*q) ))
-									s.append('{%s,%s}' % ( dx, dz ))
-							else:
-								for pnt in stroke.points:
-									x1,y1,z1 = pnt.co
-									x1 *= sx
-									z1 *= sz
-									s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-						data.append('\t' + ','.join(s))
-						data.append('};')
-
-						if gquant:
-							sx,sy,sz = ob.scale
-							gkey = (dname, gquant)
-							if gkey not in unpackers:
-								x0,y0,z0 = stroke.points[0].co
-								if 1:
-									unpackers[gkey] = [
-										'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
-										'	for (int i=0; i<len; i++){',
-										'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
-										'		out[i].x = a;',
-										'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
-										'		out[i].y = a;',
-										'	}',
-										'}'
-									]
-								else:
-									unpackers[gkey] = [
-										'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len){' %gkey,
-										'	for (int i=0; i<len; i++){',
-										'		float a = (pak[i].x * %sf) + %sf;' %(2*sx, offx+x),
-										'		out[i].x = a;',
-										'		a = (pak[i].y * %sf) + %sf;' % (2*sz, offy+z),
-										'		out[i].y = a;',
-										'	}',
-										'}'
-									]
-
-							if 1:
-								setup += [
-									'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname,lidx,sidx),
-									'	&__%s__%s_%s,' %(dname,lidx,sidx),
-									'	%s,' % len(stroke.points),
-									'	%s, %s' % (x0*q, z0*q),
-									');',
-								]
-							elif 0:
-								## only slightly smaller
-								setup += [
-									'_unpacker_%s(&__%s__%s_%s_pak,' %(gquant, dname,lidx,sidx),
-									'	&__%s__%s_%s,' %(dname,lidx,sidx),
-									'	%s,' % len(stroke.points),
-									'	%s,' % (2*sx),
-									'	%s,' % (2*sz),
-									'	%s,' % (offx+x),
-									'	%s,' % (offy+z),
-									');',
-								]
-							else:
-								setup += [
-									'for (int i=0; i<%s; i++){' % len(stroke.points),
-									'	float a = (__%s__%s_%s_pak[i].x * %sf) + %sf;' %(dname, lidx, sidx, 2*sx, (offx+x) ),
-									'	__%s__%s_%s[i].x = a;' %(dname,lidx,sidx),
-									'	a = (__%s__%s_%s_pak[i].y * %sf) + %sf;' %(dname, lidx, sidx, 2*sz, (offy+z) ),
-									'	__%s__%s_%s[i].y = a;' %(dname,lidx,sidx),
-									'}',
-								]
-				head += data
-			for lidx, layer in enumerate( ob.data.layers ):
-				for sidx, stroke in enumerate( layer.frames[0].strokes ):
-					n = len(stroke.points)
-					mat = ob.data.materials[stroke.material_index]
-					use_fill = 0
-					if mat.grease_pencil.show_fill: use_fill = 1
-					r,g,b,a = mat.grease_pencil.fill_color
-					swidth = calc_stroke_width(stroke)
-
-					if wasm:
-						draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, swidth, use_fill, r,g,b,a))
-					else:
-						if use_fill:
-							clr = '{%s,%s,%s,%s}' % (int(r*255), int(g*255), int(b*255), int(a*255))
-							if mat.c3_export_trifan:
-								draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n+1, clr))
-							elif mat.c3_export_tristrip:
-								draw.append('	raylib::draw_triangle_strip(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n+1, clr))
-							else:
-								draw += [
-									'	for (int i=0; i<%s; i+=3){' % (len(stroke.triangles)*3),
-									'		int idx = __%s__%s_%s_tris[i+2];' %(dname, lidx, sidx),
-									'		Vector2 v1 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
-									'		idx = __%s__%s_%s_tris[i+1];'   %(dname, lidx, sidx),
-									'		Vector2 v2 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
-									'		idx = __%s__%s_%s_tris[i+0];'   %(dname, lidx, sidx),
-									'		Vector2 v3 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
-									'		raylib::draw_triangle(v1,v2,v3, %s);' % clr,
-									'}',
-								]
-
-							if mat.grease_pencil.show_stroke:
-								draw.append('	raylib::draw_spline( (&__%s__%s_%s), %s, 4.0, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n))
-						else:
-							draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, %s, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n, swidth))
+			if wasm:
+				grease_to_c3_wasm(ob, datas, head, draw, setup)
+			else:
+				grease_to_c3_raylib(ob, datas, head, draw, setup)
 
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
@@ -480,6 +259,249 @@ def blender_to_c3(wasm=False):
 
 	print(datas)
 	return head + setup + draw
+
+def grease_to_c3_wasm(ob, datas, head, draw, setup):
+	SCALE = bpy.context.world.c3_export_scale
+	offx = bpy.context.world.c3_export_offset_x
+	offy = bpy.context.world.c3_export_offset_y
+
+	dname = safename(ob.data)
+	gquant = False
+	if ob.c3_grease_quantize in ('4bits', '8bits', '16bits'):
+		gquant = ob.c3_grease_quantize
+
+	if dname not in datas:
+		datas[dname]=0
+		data = []
+		for lidx, layer in enumerate( ob.data.layers ):
+			for sidx, stroke in enumerate( layer.frames[0].strokes ):
+				datas[dname] += len(stroke.points)
+				mat = ob.data.materials[stroke.material_index]
+				use_fill = 0
+				if mat.grease_pencil.show_fill: use_fill = 1
+				s = []
+				if gquant:
+					qstroke = quantizer(stroke.points, gquant)
+					n = len(qstroke['points'])
+					if not len(qstroke['points']):
+						print('stroke quantized away:', stroke)
+						continue
+					data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
+					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
+
+					x0,y0,z0 = stroke.points[0].co
+					q = qstroke['q']
+					qs = qstroke['qs']
+					setup += [
+						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname,lidx,sidx),
+						'	&__%s__%s_%s,' %(dname,lidx,sidx),
+						'	%s,' % len(stroke.points),
+						'	%s, %s' % (x0*q, z0*q),
+						');',
+					]
+
+				else:
+					## default 32bit floats ##
+					s = []
+					for pnt in stroke.points:
+						x1,y1,z1 = pnt.co
+						x1 *= sx
+						z1 *= sz
+						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(stroke.points),dname, lidx, sidx, ','.join(s) ))
+					n = len(s)
+
+				r,g,b,a = mat.grease_pencil.fill_color
+				swidth = calc_stroke_width(stroke)
+				draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, swidth, use_fill, r,g,b,a))
+
+		head += data
+		if gquant:
+			x,y,z = ob.location * SCALE
+			sx,sy,sz = ob.scale
+			gkey = (dname, gquant)
+			head += [
+				'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
+				'	for (int i=0; i<len; i++){',
+				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
+				'		out[i].x = a;',
+				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
+				'		out[i].y = a;',
+				'	}',
+				'}'
+			]
+
+def grease_to_c3_raylib(ob, datas, head, draw, setup):
+	SCALE = bpy.context.world.c3_export_scale
+	offx = bpy.context.world.c3_export_offset_x
+	offy = bpy.context.world.c3_export_offset_y
+	sx,sy,sz = ob.scale * SCALE
+	x,y,z = ob.location * SCALE
+
+	dname = safename(ob.data)
+	gquant = False
+	if ob.c3_grease_quantize in ('4bits', '8bits', '16bits'):
+		gquant = ob.c3_grease_quantize
+
+	if dname not in datas:
+		datas[dname]=0
+		data = []
+		for lidx, layer in enumerate( ob.data.layers ):
+			for sidx, stroke in enumerate( layer.frames[0].strokes ):
+				datas[dname] += len(stroke.points)
+				mat = ob.data.materials[stroke.material_index]
+				use_fill = 0
+				if mat.grease_pencil.show_fill: use_fill = 1
+				s = []
+				if use_fill:
+					if mat.c3_export_trifan:
+						x1,y1,z1 = calc_center(stroke.points)
+						x1 *= sx
+						z1 *= sz
+						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+					elif mat.c3_export_tristrip:
+						tri_strip = True
+					else:
+						tris = []
+						for tri in stroke.triangles:
+							tris.append(tri.v1)
+							tris.append(tri.v2)
+							tris.append(tri.v3)
+						tris = ','.join([str(vidx) for vidx in tris])
+						data.append('int[%s] __%s__%s_%s_tris = {%s};' % (len(stroke.triangles)*3,dname, lidx, sidx, tris ))
+
+					## default 32bit floats ##
+					for pnt in stroke.points:
+						x1,y1,z1 = pnt.co
+						x1 *= sx
+						z1 *= sz
+						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+
+					n = len(s)
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (n, dname, lidx, sidx, ','.join(s) ))
+
+				elif gquant:
+					qstroke = quantizer(stroke.points, gquant)
+					n = len(qstroke['points'])
+					if not len(qstroke['points']):
+						print('stroke quantized away:', stroke)
+						continue
+					data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
+					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
+
+					x0,y0,z0 = stroke.points[0].co
+					q = qstroke['q']
+					qs = qstroke['qs']
+					setup += [
+						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname,lidx,sidx),
+						'	&__%s__%s_%s,' %(dname,lidx,sidx),
+						'	%s,' % len(stroke.points),
+						'	%s, %s' % (x0*q, z0*q),
+						');',
+					]
+				else:
+					## default 32bit floats ##
+					s = []
+					for pnt in stroke.points:
+						x1,y1,z1 = pnt.co
+						x1 *= sx
+						z1 *= sz
+						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(stroke.points),dname, lidx, sidx, ','.join(s) ))
+					n = len(s)
+
+				r,g,b,a = mat.grease_pencil.fill_color
+				swidth = calc_stroke_width(stroke)
+
+
+				if use_fill:
+					clr = '{%s,%s,%s,%s}' % (int(r*255), int(g*255), int(b*255), int(a*255))
+					if mat.c3_export_trifan:
+						draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n, clr))
+					elif mat.c3_export_tristrip:
+						draw.append('	raylib::draw_triangle_strip(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n, clr))
+					else:
+						draw += [
+							'	for (int i=0; i<%s; i+=3){' % (len(stroke.triangles)*3),
+							'		int idx = __%s__%s_%s_tris[i+2];' %(dname, lidx, sidx),
+							'		Vector2 v1 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
+							'		idx = __%s__%s_%s_tris[i+1];'   %(dname, lidx, sidx),
+							'		Vector2 v2 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
+							'		idx = __%s__%s_%s_tris[i+0];'   %(dname, lidx, sidx),
+							'		Vector2 v3 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
+							'		raylib::draw_triangle(v1,v2,v3, %s);' % clr,
+							'	}',
+						]
+
+					if mat.grease_pencil.show_stroke:
+						draw.append('	raylib::draw_spline( (&__%s__%s_%s), %s, 4.0, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n))
+				else:
+					draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, %s, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n, swidth))
+
+		head += data
+		if gquant:
+			x,y,z = ob.location * SCALE
+			sx,sy,sz = ob.scale
+			gkey = (dname, gquant)
+			head += [
+				'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
+				'	for (int i=0; i<len; i++){',
+				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
+				'		out[i].x = a;',
+				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
+				'		out[i].y = a;',
+				'	}',
+				'}'
+			]
+
+def quantizer(points, quant, trim=True):
+	SCALE = bpy.context.world.c3_export_scale
+
+	s = []
+	if quant=='4bits':
+		q = SCALE * 0.125
+		#q = SCALE * 0.25
+		qs = 8
+	elif quant=='8bits':
+		q = SCALE * 0.5
+		qs = 2
+		#q = SCALE * 0.75
+		#qs = 1.333
+	else:
+		q = SCALE
+		qs = 1
+
+	x0,y0,z0 = points[0].co
+
+	for pnt in points:
+		x1,y1,z1 = pnt.co
+		dx = int( (x0-x1)*q )
+		dz = int( (z0-z1)*q )
+		if quant=='4bits':
+			if dx > 7:
+				print('WARN: 4bit vertex clip x=', dx)
+				dx = 7
+			elif dx < -8:
+				print('WARN: 4bit vertex clip x=', dx)
+				dx = -8
+
+			if dz > 7:
+				print('WARN: 4bit vertex clip z=', dz)
+				dz = 7
+			elif dz < -8:
+				print('WARN: 4bit vertex clip z=', dz)
+				dz = -8
+
+		#s.append('{%s,%s}' % ( int(x1*q), int(-z1*q) ))
+		#s.append('{%s,%s}' % ( int(dx*q), int(dz*q) ))
+		if (dx==0 and dz==0) and trim:
+			continue
+		s.append('{%s,%s}' % ( dx, dz ))
+
+	return {'q':q, 'qs':qs, 'points':s}
+
 
 def calc_stroke_width(stroke):
 	sw = 0.0
