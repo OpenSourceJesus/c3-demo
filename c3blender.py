@@ -127,6 +127,26 @@ bitstruct Vector2_4bits : ichar {
 	ichar y : 0..3;
 }
 
+bitstruct Vector2_6bits : int {
+	ichar x0 : 26..31;  // 6bits
+	ichar y0 : 20..25;  // 6bits
+	ichar x1 : 15..19;  // 5bits
+	ichar y1 : 10..14;  // 5bits
+	ichar x2 : 5..9;    // 5bits
+	ichar y2 : 0..4;    // 5bits
+}
+
+bitstruct Vector2_7bits : int {
+	ichar x0 : 24..31;  // 8bits
+	ichar y0 : 17..23;  // 8bits
+	ichar x1 : 12..16;  // 4bits
+	ichar y1 : 8..11;  // 4bits
+	ichar x2 : 4..7;    // 4bits
+	ichar y2 : 0..3;    // 4bits
+}
+
+
+
 struct Vector2_8bits @packed {
 	ichar x;
 	ichar y;
@@ -267,7 +287,7 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 
 	dname = safename(ob.data)
 	gquant = False
-	if ob.c3_grease_quantize in ('4bits', '8bits', '16bits'):
+	if ob.c3_grease_quantize != '32bits':
 		gquant = ob.c3_grease_quantize
 
 	gopt = ob.c3_grease_optimize
@@ -296,8 +316,6 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 					if not len(qstroke['points']):
 						print('stroke quantized away:', stroke)
 						continue
-					data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
-					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
 
 					x0,y0,z0 = points[0].co
 					q = qstroke['q']
@@ -309,7 +327,14 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 						'	%s, %s' % (x0*q, z0*q),
 						');',
 					]
-					n += 1
+
+					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
+
+					if gquant in ('6bits', '7bits'):
+						data.append('Vector2[%s] __%s__%s_%s;' % ( (n*3),dname, lidx, sidx ))
+					else:
+						data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
+						n += 1
 
 				else:
 					## default 32bit floats ##
@@ -325,25 +350,104 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 
 				r,g,b,a = mat.grease_pencil.fill_color
 				swidth = calc_stroke_width(stroke)
-				draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, swidth, use_fill, r,g,b,a))
+
+				if gquant in ('6bits', '7bits'):
+					draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n*3, swidth, use_fill, r,g,b,a))
+				else:
+					draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, swidth, use_fill, r,g,b,a))
 
 		head += data
 		if gquant:
-			x,y,z = ob.location * SCALE
-			sx,sy,sz = ob.scale
-			gkey = (dname, gquant)
-			head += [
-				'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
-				'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
-				'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
-				'	for (int i=0; i<len; i++){',
-				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
-				'		out[i+1].x = a;',
-				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
-				'		out[i+1].y = a;',
-				'	}',
-				'}'
-			]
+			if gquant in ('6bits', '7bits'):
+				head += gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy)
+			else:
+				head += gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy)
+
+
+def gen_delta_delta_unpacker_BAD(ob, dname, gquant, SCALE, qs, offx, offy):
+	x,y,z = ob.location * SCALE
+	sx,sy,sz = ob.scale
+	gkey = (dname, gquant)
+	return [
+		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
+		'	int j=0;',
+		'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
+		'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
+		'	for (int i=0; i<len; i++){',
+		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs*sx, offx+x),
+		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' % (qs*sz, offy+z),
+
+		'		j++;',
+		'		out[j].y = ay;',
+		'		out[j].x = ax;',
+
+		'		j++;',
+		'		out[j].x = ax - pak[i].x1;',
+		'		out[j].y = ay - pak[i].y1;',
+
+		'		j++;',
+		'		out[j].x = ax - pak[i].x2;',
+		'		out[j].y = ay - pak[i].y2;',
+
+		'	}',
+		'}'
+	]
+
+
+
+def gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
+	x,y,z = ob.location * SCALE
+	sx,sy,sz = ob.scale
+	gkey = (dname, gquant)
+	return [
+		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
+		'	int j=0;',
+		'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
+		'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
+		'	for (int i=0; i<len; i++){',
+		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs*sx, offx+x),
+		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' % (qs*sz, offy+z),
+		#'		float ax = pak[i].x0'
+
+		'		j++;',
+		'		out[j].x = ax;',
+		'		out[j].y = ay;',
+
+		'		j++;',
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x1)) * %sf) + %sf;' % (qs*sx, offx+x),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y1)) * %sf) + %sf;' % (qs*sz, offy+z),
+
+		'		j++;',
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' % (qs*sx, offx+x),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' % (qs*sz, offy+z),
+
+
+		#'		j++;',
+		#'		out[j].x = ax - pak[i].x2;',
+		#'		out[j].y = ay - pak[i].y2;',
+
+		'	}',
+		'}'
+	]
+
+
+def gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
+	x,y,z = ob.location * SCALE
+	sx,sy,sz = ob.scale
+	gkey = (dname, gquant)
+	return [
+		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
+		'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
+		'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
+		'	for (int i=0; i<len; i++){',
+		'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
+		'		out[i+1].x = a;',
+		'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
+		'		out[i+1].y = a;',
+		'	}',
+		'}'
+	]
+
 
 def grease_to_c3_raylib(ob, datas, head, draw, setup):
 	SCALE = bpy.context.world.c3_export_scale
@@ -354,7 +458,7 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 
 	dname = safename(ob.data)
 	gquant = False
-	if ob.c3_grease_quantize in ('4bits', '8bits', '16bits'):
+	if ob.c3_grease_quantize != '32bits':
 		gquant = ob.c3_grease_quantize
 
 	if dname not in datas:
@@ -477,9 +581,11 @@ def quantizer(points, quant, trim=True):
 	s = []
 	if quant=='4bits':
 		q = SCALE * 0.125
-		#q = SCALE * 0.25
 		qs = 8
-	elif quant=='8bits':
+	elif quant=='6bits' or quant=='7bits':
+		q = SCALE * 0.5
+		qs = 2
+	elif quant=='8bits' or quant == "7x5x4bits":
 		q = SCALE * 0.5
 		qs = 2
 		#q = SCALE * 0.75
@@ -490,7 +596,8 @@ def quantizer(points, quant, trim=True):
 
 	x0,y0,z0 = points[0].co
 
-	for pnt in points:
+	mvec = []
+	for pnt in points[1:]:
 		x1,y1,z1 = pnt.co
 		dx = int( (x0-x1)*q )
 		dz = int( (z0-z1)*q )
@@ -508,16 +615,63 @@ def quantizer(points, quant, trim=True):
 			elif dz < -8:
 				print('WARN: 4bit vertex clip z=', dz)
 				dz = -8
+		elif quant=='6bits':
+			if dx >= 32:
+				print('WARN: 6bit vertex clip x=', dx)
+				dx = 31
+			elif dx < -32:
+				print('WARN: 6bit vertex clip x=', dx)
+				dx = -32
+			if dz >= 32:
+				print('WARN: 6bit vertex clip z=', dz)
+				dz = 31
+			elif dz < -32:
+				print('WARN: 6bit vertex clip z=', dz)
+				dz = -32
+
 
 		#s.append('{%s,%s}' % ( int(x1*q), int(-z1*q) ))
 		#s.append('{%s,%s}' % ( int(dx*q), int(dz*q) ))
-		vec = '{%s,%s}' % ( dx, dz )
-		if trim:
-			if (dx==0 and dz==0):
-				continue
-			elif s and s[-1] == vec:
-				continue
-		s.append(vec)
+
+		if quant in ('6bits', '7bits'):
+			if mvec:
+				mdx, mdz = mvec[0]
+				## delta of delta
+				ddx = mdx-dx
+				ddy = mdz-dz
+				if quant == '6bits':  ## after 5bits
+					if ddx >= 16: ddx = 15
+					elif ddx < -16: ddx = -16
+					if ddy >= 16: ddy = 15
+					elif ddy < -16: ddy = -16
+				else:  ## after 4bits
+					if ddx >= 8: ddx = 7
+					elif ddx < -8: ddx = -8
+					if ddy >= 8: ddy = 7
+					elif ddy < -8: ddy = -8
+				v = ( ddx, ddy )
+			else:
+				v = ( dx, dz )
+			mvec.append(v)
+
+			if len(mvec) >= 3:
+				s.append('{%s}' % ', '.join( '%s,%s' % v for v in mvec))
+				#s.append('{%s}' % (str(mvec)[1:-1]))
+				mvec = []
+		else:
+			vec = '{%s,%s}' % ( dx, dz )
+			if trim:
+				#if (dx==0 and dz==0):
+				#	continue
+				if s and s[-1] == vec:
+					continue
+			s.append(vec)
+
+	if mvec:
+		print(mvec)
+		while len(mvec) < 3:
+			mvec.append((0,0))
+		s.append('{%s}' % ', '.join( '%s,%s' % v for v in mvec))
 
 	return {'q':q, 'qs':qs, 'points':s}
 
@@ -656,6 +810,9 @@ bpy.types.Object.c3_grease_quantize = bpy.props.EnumProperty(
 		("32bits", "32bits", "32bit vertices"), 
 		("16bits", "16bits", "16bit vertices"), 
 		("8bits", "8bits", "8bit vertices"), 
+		#("7x5x4bits", "7x5x4bits", "vertices(7bits, 7bits, 5bits, 5bits, 4bits, 4bits)"), 
+		("7bits", "7bits", "vertex chunk(8bits, 8bits, 4bits, 4bits, 4bits, 4bits)"), 
+		("6bits", "6bits", "vertex chunk(6bits, 6bits, 5bits, 5bits, 5bits, 5bits)"), 
 		("4bits", "4bits", "4bit vertices"), 
 	]
 )
@@ -756,7 +913,8 @@ def gen_test_scene():
 	ob.c3_grease_optimize=4  ## only works with WASM export
 	#ob.c3_grease_quantize="16bits"
 	#ob.c3_grease_quantize="4bits"
-	ob.c3_grease_quantize="8bits"
+	#ob.c3_grease_quantize="8bits"
+	ob.c3_grease_quantize = "7bits" #"7x5x4bits"
 
 	ob.location.x += 2
 	ob.scale.z += random()
