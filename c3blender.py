@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import os, sys, subprocess, atexit, webbrowser, math
+import os, sys, subprocess, atexit, webbrowser, math, base64
 from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
 EMSDK = os.path.join(_thisdir, "emsdk")
@@ -164,7 +164,6 @@ struct Vector2_16bits @packed {
 
 MAIN_WASM = '''
 	raylib::init_window(%s, %s, "Hello, from C3 WebAssembly");
-	raylib::set_target_fps(60);
 	raylib_js_set_entry(&game_frame);
 
 '''
@@ -204,9 +203,10 @@ def blender_to_c3(wasm=False):
 		'fn void game_frame() @wasm {',
 		'	Object self;',
 		'	float dt = raylib::get_frame_time();',
-		'	raylib::begin_drawing();',
-		'	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});',
 	]
+	if not wasm:
+		draw.append('	raylib::begin_drawing();')
+	draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
 	meshes = []
 	datas = {}
 	for ob in bpy.data.objects:
@@ -269,7 +269,8 @@ def blender_to_c3(wasm=False):
 		setup.append(MAIN % (resx, resy))
 
 	setup.append('}')
-	draw.append('	raylib::end_drawing();')
+	if not wasm:
+		draw.append('	raylib::end_drawing();')
 	draw.append('}')
 
 	head.append('Object[%s] objects;' % len(meshes))
@@ -668,9 +669,14 @@ def quantizer(points, quant, trim=True):
 			s.append(vec)
 
 	if mvec:
-		print(mvec)
-		while len(mvec) < 3:
-			mvec.append((0,0))
+		print('tooshort:', mvec)
+		if len(mvec) == 1:
+			while len(mvec) < 3:
+				mvec.append((0,0))
+		else:
+			while len(mvec) < 3:
+				mvec.append(mvec[-1])
+		print('filled:', mvec)
 		s.append('{%s}' % ', '.join( '%s,%s' % v for v in mvec))
 
 	return {'q':q, 'qs':qs, 'points':s}
@@ -763,6 +769,303 @@ def build_linux():
 	bin = build(input=tmp, opt=bpy.context.world.c3_export_opt)
 	return bin
 
+JS_DECOMP = '''
+var $=null
+var $deco = async (u,t) => {
+	var d=new DecompressionStream('gzip')
+	var r=await fetch('data:application/octet-stream;base64,'+u)
+	var b=await r.blob()
+	var s=b.stream().pipeThrough(d)
+	var o=await new Response(s).blob()
+	if (t) return await o.text();
+	else return await o.arrayBuffer();
+}
+$deco($0,1).then((js)=>{
+	console.log(js);
+	$=eval(js);
+	$deco($1).then((r)=>{
+		var io={env:$.api_proxy()};
+		WebAssembly.instantiate(r,io).then((res)=>{
+			console.log(res.instance);
+			$.api_reset(res, "game");
+		});
+	});
+});
+'''
+
+JS_LIB_API = '''
+function make_environment(env) {
+	return new Proxy(env, {
+		get(target, prop, receiver) {
+			if (env[prop] !== undefined) {
+				return env[prop].bind(env);
+			}
+			return (...args) => {
+				throw new Error(`NOT IMPLEMENTED: ${prop} ${args}`);
+			}
+		}
+	});
+}
+
+function cstrlen(mem, ptr) {
+	let len = 0;
+	while (mem[ptr] != 0) {
+		len++;
+		ptr++;
+	}
+	return len;
+}
+
+function cstr_by_ptr(mem_buffer, ptr) {
+	const mem = new Uint8Array(mem_buffer);
+	const len = cstrlen(mem, ptr);
+	const bytes = new Uint8Array(mem_buffer, ptr, len);
+	return new TextDecoder().decode(bytes);
+}
+
+function color_hex_unpacked(r, g, b, a) {
+	r = r.toString(16).padStart(2, '0');
+	g = g.toString(16).padStart(2, '0');
+	b = b.toString(16).padStart(2, '0');
+	a = a.toString(16).padStart(2, '0');
+	return "#"+r+g+b+a;
+}
+
+function color_hex(color) {
+	const r = ((color>>(0*8))&0xFF).toString(16).padStart(2, '0');
+	const g = ((color>>(1*8))&0xFF).toString(16).padStart(2, '0');
+	const b = ((color>>(2*8))&0xFF).toString(16).padStart(2, '0');
+	const a = ((color>>(3*8))&0xFF).toString(16).padStart(2, '0');
+	return "#"+r+g+b+a;
+}
+
+function getColorFromMemory(buffer, color_ptr) {
+	const [r, g, b, a] = new Uint8Array(buffer, color_ptr, 4);
+	return color_hex_unpacked(r, g, b, a);
+}
+
+class api{
+	api_proxy(){
+		return make_environment(this);
+	}
+	api_reset( wasm, id ) {
+		this.wasm = wasm;
+		this.canvas = document.getElementById(id);
+		this.ctx = this.canvas.getContext("2d");
+		console.log(this.ctx);
+		this.wasm.instance.exports.main();
+		const next = (timestamp) => {
+			if (this.quit) {
+				return;
+			}
+			this.dt = (timestamp - this.previous)/1000.0;
+			this.previous = timestamp;
+			this.entryFunction();
+			window.requestAnimationFrame(next);
+		};
+		window.requestAnimationFrame((timestamp) => {
+			this.previous = timestamp;
+			window.requestAnimationFrame(next);
+		});
+	}
+'''
+
+raylib_like_api = {
+	'InitWindow' : '''
+	InitWindow(width, height, title_ptr) {
+		this.ctx.canvas.width = width;
+		this.ctx.canvas.height = height;
+		const buffer = this.wasm.instance.exports.memory.buffer;
+		document.title = cstr_by_ptr(buffer, title_ptr);
+	}
+	''',
+	'GetScreenWidth':'''
+	GetScreenWidth() {
+		return this.ctx.canvas.width;
+	}
+	''',
+
+	'GetScreenHeight':'''
+	GetScreenHeight() {
+		return this.ctx.canvas.height;
+	}
+	''',
+
+	'GetFrameTime':'''
+	GetFrameTime() {
+		return Math.min(this.dt, 1.0/60);
+	}
+	''',
+
+	'DrawRectangleV':'''
+	DrawRectangleV(position_ptr, size_ptr, color_ptr) {
+		const buffer = this.wasm.instance.exports.memory.buffer;
+		const color = getColorFromMemory(buffer, color_ptr);
+		const position = new Float32Array(buffer, position_ptr, 2);
+		const size = new Float32Array(buffer, size_ptr, 2);
+		this.ctx.fillStyle = color;
+		this.ctx.fillRect(position[0], position[1], size[0], size[1]);
+	}
+	''',
+
+	'DrawSplineLinearWASM':'''
+	DrawSplineLinearWASM(points_ptr, pointCount, thick, fill, r,g,b,a){
+		const buffer = this.wasm.instance.exports.memory.buffer;
+		const points = new Float32Array(buffer, points_ptr, pointCount*2);
+		this.ctx.strokeStyle = 'black';
+		if (fill) this.ctx.fillStyle = 'rgba('+(r*255)+','+(g*255)+','+(b*255)+',' + a + ')';
+		this.ctx.lineWidth = thick;
+		this.ctx.beginPath();
+		this.ctx.moveTo(points[0], points[1]);
+		for (var i=2; i<points.length; i+=2){
+			this.ctx.lineTo(points[i], points[i+1]);
+		}
+		if (fill){
+			this.ctx.closePath();
+			this.ctx.fill();
+		}
+		this.ctx.stroke();
+	}
+	''',
+
+	'DrawCircleWASM':'''
+	DrawCircleWASM(x, y, radius, color_ptr) {
+		const buffer = this.wasm.instance.exports.memory.buffer;
+		const [r, g, b, a] = new Uint8Array(buffer, color_ptr, 4);
+		const color = color_hex_unpacked(r, g, b, a);
+		this.ctx.strokeStyle = 'black';
+		this.ctx.beginPath();
+		this.ctx.arc(x, y, radius, 0, 2*Math.PI, false);
+		this.ctx.fillStyle = color;
+		this.ctx.closePath();
+		this.ctx.stroke();
+	}
+	''',
+
+	'ClearBackground':'''
+	ClearBackground(color_ptr) {
+		this.ctx.fillStyle = getColorFromMemory(this.wasm.instance.exports.memory.buffer, color_ptr);
+		this.ctx.fillRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+	}
+	''',
+
+	'raylib_js_set_entry':'''
+	raylib_js_set_entry(entry) {
+		this.entryFunction = this.wasm.instance.exports.__indirect_function_table.get(entry);
+	}
+	''',
+
+	'':'''
+	GetRandomValue(min, max) {
+		return min + Math.floor(Math.random()*(max - min + 1));
+	}
+	''',
+
+	'ColorFromHSV':'''
+	ColorFromHSV(result_ptr, hue, saturation, value) {
+		const buffer = this.wasm.instance.exports.memory.buffer;
+		const result = new Uint8Array(buffer, result_ptr, 4);
+
+		// Red channel
+		let k = (5.0 + hue/60.0)%6;
+		let t = 4.0 - k;
+		k = (t < k)? t : k;
+		k = (k < 1)? k : 1;
+		k = (k > 0)? k : 0;
+		result[0] = Math.floor((value - value*saturation*k)*255.0);
+
+		// Green channel
+		k = (3.0 + hue/60.0)%6;
+		t = 4.0 - k;
+		k = (t < k)? t : k;
+		k = (k < 1)? k : 1;
+		k = (k > 0)? k : 0;
+		result[1] = Math.floor((value - value*saturation*k)*255.0);
+
+		// Blue channel
+		k = (1.0 + hue/60.0)%6;
+		t = 4.0 - k;
+		k = (t < k)? t : k;
+		k = (k < 1)? k : 1;
+		k = (k > 0)? k : 0;
+		result[2] = Math.floor((value - value*saturation*k)*255.0);
+
+		result[3] = 255;
+	}
+	''',
+
+}
+
+
+
+
+def gen_js_api():
+	js = [
+		JS_LIB_API,
+	]
+	for fname in raylib_like_api:
+		js.append(raylib_like_api[fname])
+	js.append('}')
+	js.append('new api()')
+	return '\n'.join(js)
+
+def gen_html(wasm):
+	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
+	print(cmd)
+	subprocess.check_call(cmd)
+	wa = open(wasm,'rb').read()
+	w = open(wasm+'.gz','rb').read()
+	b = base64.b64encode(w).decode('utf-8')
+
+	jtmp = '/tmp/c3api.js'
+	jslib = gen_js_api()
+	open(jtmp,'w').write(jslib)
+	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
+	print(cmd)
+	subprocess.check_call(cmd)
+	js = open(jtmp+'.gz','rb').read()
+	jsb = base64.b64encode(js).decode('utf-8')
+
+	o = [
+		'<html>',
+		'<body>',
+		'<canvas id="game"></canvas>',
+		'<script>', 
+		'var $0="%s"' % jsb,
+		'var $1="%s"' % b,
+		JS_DECOMP, 
+		'</script>',
+	]
+
+
+	hsize = len('\n'.join(o)) + len('</body></html>')
+
+	o += [
+		'<pre>',
+		'jslib bytes=%s' % len(jslib),
+		'jslib.gz bytes=%s' % len(js),
+		'jslib.base64 bytes=%s' % len(jsb),
+		'wasm bytes=%s' % len(wa),
+		'gzip bytes=%s' % len(w),
+		'base64 bytes=%s' % len(b),
+		'html+js bytes=%s' % (hsize-len(b)),
+		'total bytes=%s' % hsize,
+		'C3 optimization=%s' % bpy.context.world.c3_export_opt,
+
+	]
+	for ob in bpy.data.objects:
+		if ob.type=='GPENCIL':
+			o.append('%s = %s' % (ob.name, ob.c3_grease_quantize))
+
+	o += [
+		'<pre>',
+		'</body>',
+		'</html>',
+
+	]
+
+	return '\n'.join(o)
+
 SERVER_PROC = None
 def build_wasm():
 	global SERVER_PROC
@@ -773,8 +1076,10 @@ def build_wasm():
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
 	wasm = build(input=tmp, wasm=True, opt=bpy.context.world.c3_export_opt)
-	os.system('cp -v ./index.html /tmp/.')
-	os.system('cp -v ./raylib.js /tmp/.')
+	#os.system('cp -v ./index.html /tmp/.')
+	#os.system('cp -v ./raylib.js /tmp/.')
+	html = gen_html(wasm)
+	open('/tmp/index.html', 'w').write(html)
 	cmd = ['python', '-m', 'http.server', '6969']
 	SERVER_PROC = subprocess.Popen(cmd, cwd='/tmp')
 	atexit.register(lambda:SERVER_PROC.kill())
