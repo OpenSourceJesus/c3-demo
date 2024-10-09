@@ -229,7 +229,8 @@ def blender_to_c3(wasm=False):
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
-			setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
+			#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
+			setup.append('	objects[%s].color={%s,%s,%s,0xFF};' % (idx, int(random()*255), int(random()*255), int(random()*255) ))
 
 			draw.append('	self = objects[%s];' % idx)
 			if scripts:
@@ -999,17 +1000,24 @@ raylib_like_api = {
 
 
 
-def gen_js_api():
+def gen_js_api(c3):
+	skip = []
+	if 'raylib::color_from_hsv' not in c3:
+		skip.append('ColorFromHSV')
+
 	js = [
 		JS_LIB_API,
 	]
 	for fname in raylib_like_api:
+		if fname in skip:
+			print('skipping:', fname)
+			continue
 		js.append(raylib_like_api[fname])
 	js.append('}')
 	js.append('new api()')
 	return '\n'.join(js)
 
-def gen_html(wasm):
+def gen_html(wasm, c3):
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
 	print(cmd)
 	subprocess.check_call(cmd)
@@ -1018,7 +1026,7 @@ def gen_html(wasm):
 	b = base64.b64encode(w).decode('utf-8')
 
 	jtmp = '/tmp/c3api.js'
-	jslib = gen_js_api()
+	jslib = gen_js_api(c3)
 	open(jtmp,'w').write(jslib)
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
 	print(cmd)
@@ -1078,7 +1086,7 @@ def build_wasm():
 	wasm = build(input=tmp, wasm=True, opt=bpy.context.world.c3_export_opt)
 	#os.system('cp -v ./index.html /tmp/.')
 	#os.system('cp -v ./raylib.js /tmp/.')
-	html = gen_html(wasm)
+	html = gen_html(wasm, o)
 	open('/tmp/index.html', 'w').write(html)
 	cmd = ['python', '-m', 'http.server', '6969']
 	SERVER_PROC = subprocess.Popen(cmd, cwd='/tmp')
@@ -1187,14 +1195,14 @@ self.velocity += GRAVITY*dt;
 float nx = self.position.x + self.velocity.x*dt;
 if (nx < 0 || nx + self.scale.x > raylib::get_screen_width()) {
 	self.velocity.x *= -COLLISION_DAMP;
-	self.color = raylib::color_from_hsv(360*((float)raylib::get_random_value(0, 100)/100.0), 1, 1);
+	self.color = {(char)raylib::get_random_value(0, 255), (char)raylib::get_random_value(0, 255), (char)raylib::get_random_value(0, 255), 0xFF};
 } else {
 	self.position.x = nx;
 }
 float ny = self.position.y + self.velocity.y*dt;
 if (ny < 0 || ny + self.scale.y > raylib::get_screen_height()) {
 	self.velocity.y *= -COLLISION_DAMP;
-	self.color = raylib::color_from_hsv(360*((float)raylib::get_random_value(0, 100)/100.0), 1, 1);
+	self.color = {(char)raylib::get_random_value(0, 255), (char)raylib::get_random_value(0, 255), (char)raylib::get_random_value(0, 255), 0xFF};
 } else {
 	self.position.y = ny;
 }
@@ -1215,7 +1223,7 @@ def gen_test_scene():
 
 	bpy.ops.object.gpencil_add(type='MONKEY')
 	ob = bpy.context.active_object
-	ob.c3_grease_optimize=4  ## only works with WASM export
+	ob.c3_grease_optimize=4  ## only works with WASM export, TODO this should be on ob.data
 	#ob.c3_grease_quantize="16bits"
 	#ob.c3_grease_quantize="4bits"
 	#ob.c3_grease_quantize="8bits"
