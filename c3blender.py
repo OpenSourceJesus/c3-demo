@@ -18,7 +18,7 @@ if not os.path.isdir('c3'):
 C3 = os.path.abspath('./c3/c3c')
 assert os.path.isfile(C3)
 
-if "--wasm" in sys.argv and not os.path.isdir(EMSDK):
+if "--install-wasm" in sys.argv and not os.path.isdir(EMSDK):
 	cmd = [
 		"git",
 		"clone",
@@ -31,7 +31,7 @@ if "--wasm" in sys.argv and not os.path.isdir(EMSDK):
 	emsdk_update()
 
 EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc")
-if not EMCC and "--wasm" in sys.argv:
+if not EMCC and "--install-wasm" in sys.argv:
 	emsdk_update()
 
 
@@ -91,6 +91,13 @@ if __name__=='__main__':
 		pass
 	elif '--blender' in sys.argv or os.path.isfile('/usr/bin/blender'):
 		cmd = [BLENDER, '--python', __file__]
+		exargs = []
+		for arg in sys.argv:
+			if arg.startswith('--'):
+				exargs.append(arg)
+		if exargs:
+			cmd.append('--')
+			cmd += exargs
 		print(cmd)
 		subprocess.check_call(cmd)
 		sys.exit()
@@ -186,12 +193,12 @@ def is_maybe_circle(ob):
 def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
-def blender_to_c3(wasm=False):
-	resx = bpy.context.world.c3_export_res_x
-	resy = bpy.context.world.c3_export_res_y
-	SCALE = bpy.context.world.c3_export_scale
-	offx = bpy.context.world.c3_export_offset_x
-	offy = bpy.context.world.c3_export_offset_y
+def blender_to_c3(world, wasm=False):
+	resx = world.c3_export_res_x
+	resy = world.c3_export_res_y
+	SCALE = world.c3_export_scale
+	offx = world.c3_export_offset_x
+	offy = world.c3_export_offset_y
 
 	unpackers = {}
 	head  = [HEADER]
@@ -283,9 +290,11 @@ def blender_to_c3(wasm=False):
 	return head + setup + draw
 
 def grease_to_c3_wasm(ob, datas, head, draw, setup):
-	SCALE = bpy.context.world.c3_export_scale
-	offx = bpy.context.world.c3_export_offset_x
-	offy = bpy.context.world.c3_export_offset_y
+	SCALE = WORLD.c3_export_scale
+	offx = WORLD.c3_export_offset_x
+	offy = WORLD.c3_export_offset_y
+	sx,sy,sz = ob.scale * SCALE
+	x,y,z = ob.location * SCALE
 
 	dname = safename(ob.data)
 	gquant = False
@@ -452,9 +461,9 @@ def gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
 
 
 def grease_to_c3_raylib(ob, datas, head, draw, setup):
-	SCALE = bpy.context.world.c3_export_scale
-	offx = bpy.context.world.c3_export_offset_x
-	offy = bpy.context.world.c3_export_offset_y
+	SCALE = WORLD.c3_export_scale
+	offx = WORLD.c3_export_offset_x
+	offy = WORLD.c3_export_offset_y
 	sx,sy,sz = ob.scale * SCALE
 	x,y,z = ob.location * SCALE
 
@@ -578,7 +587,7 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 			]
 
 def quantizer(points, quant, trim=True):
-	SCALE = bpy.context.world.c3_export_scale
+	SCALE = WORLD.c3_export_scale
 
 	s = []
 	if quant=='4bits':
@@ -717,7 +726,7 @@ class C3Export(bpy.types.Operator):
 	def poll(cls, context):
 		return True
 	def execute(self, context):
-		exe = build_linux()
+		exe = build_linux(context.world)
 		_BUILD_INFO['native']=exe
 		_BUILD_INFO['native-size']=len(open(exe,'rb').read())
 		return {"FINISHED"}
@@ -730,7 +739,7 @@ class C3Export(bpy.types.Operator):
 	def poll(cls, context):
 		return True
 	def execute(self, context):
-		exe = build_wasm()
+		exe = build_wasm(context.world)
 		_BUILD_INFO['wasm']=exe
 		_BUILD_INFO['wasm-size']=len(open(exe,'rb').read())
 		return {"FINISHED"}
@@ -761,13 +770,15 @@ class C3WorldPanel(bpy.types.Panel):
 		if _BUILD_INFO['native-size']:
 			self.layout.label(text="exe KB=%s" %( _BUILD_INFO['native-size']//1024 ))
 
-def build_linux():
-	o = blender_to_c3()
+def build_linux(world):
+	global WORLD
+	WORLD = world
+	o = blender_to_c3(world)
 	o = '\n'.join(o)
 	#print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
-	bin = build(input=tmp, opt=bpy.context.world.c3_export_opt)
+	bin = build(input=tmp, opt=world.c3_export_opt)
 	return bin
 
 JS_DECOMP = '''
@@ -1058,7 +1069,7 @@ def gen_html(wasm, c3):
 		'base64 bytes=%s' % len(b),
 		'html+js bytes=%s' % (hsize-len(b)),
 		'total bytes=%s' % hsize,
-		'C3 optimization=%s' % bpy.context.world.c3_export_opt,
+		'C3 optimization=%s' % WORLD.c3_export_opt,
 
 	]
 	for ob in bpy.data.objects:
@@ -1075,15 +1086,17 @@ def gen_html(wasm, c3):
 	return '\n'.join(o)
 
 SERVER_PROC = None
-def build_wasm():
-	global SERVER_PROC
+WORLD = None
+def build_wasm( world ):
+	global SERVER_PROC, WORLD
+	WORLD = world
 	if SERVER_PROC: SERVER_PROC.kill()
-	o = blender_to_c3(wasm=True)
+	o = blender_to_c3(world, wasm=True)
 	o = '\n'.join(o)
 	#print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
-	wasm = build(input=tmp, wasm=True, opt=bpy.context.world.c3_export_opt)
+	wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt)
 	#os.system('cp -v ./index.html /tmp/.')
 	#os.system('cp -v ./raylib.js /tmp/.')
 	html = gen_html(wasm, o)
@@ -1214,7 +1227,7 @@ if (self.position.x >= raylib::get_screen_width()) self.position.x = 0;
 '''
 
 
-def gen_test_scene():
+def gen_test_scene(quant=None, wasm_simple_stroke_opt=None):
 	ob = bpy.data.objects['Cube']
 	ob.scale.z += random()
 	txt = bpy.data.texts.new(name='example1.c3')
@@ -1223,11 +1236,11 @@ def gen_test_scene():
 
 	bpy.ops.object.gpencil_add(type='MONKEY')
 	ob = bpy.context.active_object
-	ob.c3_grease_optimize=4  ## only works with WASM export, TODO this should be on ob.data
-	#ob.c3_grease_quantize="16bits"
-	#ob.c3_grease_quantize="4bits"
-	#ob.c3_grease_quantize="8bits"
-	ob.c3_grease_quantize = "7bits" #"7x5x4bits"
+	if wasm_simple_stroke_opt:
+		## only works with WASM export
+		ob.data.c3_grease_optimize=int(wasm_simple_stroke_opt)
+	if quant:
+		ob.c3_grease_quantize = quant
 
 	ob.location.x += 2
 	ob.scale.z += random()
@@ -1244,4 +1257,19 @@ def gen_test_scene():
 	ob.c3_script0 = txt
 	ob['myprop'] = 1.0
 
-gen_test_scene()
+if __name__=='__main__':
+	q = None
+	o = None
+	for arg in sys.argv:
+		if arg.endswith('bits'):
+			q = arg.split('--')[-1]
+		elif arg.startswith('--stroke-opt='):
+			o = arg.split('--')[-1]
+	if '--test' in sys.argv:
+		gen_test_scene(q,o)
+	if '--wasm' in sys.argv:
+		build_wasm( bpy.data.worlds[0] )
+	elif '--linux' in sys.argv:
+		build_linux( bpy.data.worlds[0] )
+
+
