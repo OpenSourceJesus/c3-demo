@@ -54,3 +54,23 @@ def gen_test_scene(quant=None, wasm_simple_stroke_opt=None):
 	txt.from_string(EXAMPLE2)
 	ob.c3_script0 = txt
 	ob['myprop'] = 1.0
+
+def test2(quant=None, wasm_simple_stroke_opt=None):
+	ob = bpy.data.objects['Cube']
+	ob.hide_set(True)
+
+	bpy.ops.object.gpencil_add(type='MONKEY')
+	ob = bpy.context.active_object
+	if wasm_simple_stroke_opt:
+		ob.data.c3_grease_optimize=int(wasm_simple_stroke_opt)
+	if quant:
+		ob.c3_grease_quantize = quant
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.data.body = 'Oo'
+	ob.rotation_euler.x = math.pi/2
+	ob.location.x -= 0.73
+	ob.location.z -= 0.13
+	ob.data.extrude = 0.18
+	print(ob.type)
