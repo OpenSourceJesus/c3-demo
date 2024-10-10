@@ -771,44 +771,7 @@ $deco($0,1).then((js)=>{
 });
 '''
 
-JS_LIB_API = '''
-function make_environment(env) {
-	return new Proxy(env, {
-		get(target, prop, receiver) {
-			if (env[prop] !== undefined) {
-				return env[prop].bind(env);
-			}
-			return (...args) => {
-				throw new Error(`NOT IMPLEMENTED: ${prop} ${args}`);
-			}
-		}
-	});
-}
-
-function cstrlen(mem, ptr) {
-	let len = 0;
-	while (mem[ptr] != 0) {
-		len++;
-		ptr++;
-	}
-	return len;
-}
-
-function cstr_by_ptr(mem_buffer, ptr) {
-	const mem = new Uint8Array(mem_buffer);
-	const len = cstrlen(mem, ptr);
-	const bytes = new Uint8Array(mem_buffer, ptr, len);
-	return new TextDecoder().decode(bytes);
-}
-
-function color_hex_unpacked(r, g, b, a) {
-	r = r.toString(16).padStart(2, '0');
-	g = g.toString(16).padStart(2, '0');
-	b = b.toString(16).padStart(2, '0');
-	a = a.toString(16).padStart(2, '0');
-	return "#"+r+g+b+a;
-}
-
+JS_LIB_NOT_USED_YET = '''
 function color_hex(color) {
 	const r = ((color>>(0*8))&0xFF).toString(16).padStart(2, '0');
 	const g = ((color>>(1*8))&0xFF).toString(16).padStart(2, '0');
@@ -816,126 +779,166 @@ function color_hex(color) {
 	const a = ((color>>(3*8))&0xFF).toString(16).padStart(2, '0');
 	return "#"+r+g+b+a;
 }
+'''
 
-function getColorFromMemory(buffer, color_ptr) {
-	const [r, g, b, a] = new Uint8Array(buffer, color_ptr, 4);
-	return color_hex_unpacked(r, g, b, a);
+JS_LIB_API = '''
+function make_environment(e){
+	return new Proxy(e,{
+		get(t,p,r) {
+			if (e[p] !== undefined) {
+				return e[p].bind(e)
+			}
+			return (...args) => {
+				throw new Error(p)
+			}
+		}
+	});
+}
+
+function cstrlen(mem, ptr) {
+	let len = 0
+	while (mem[ptr] != 0) {
+		len++
+		ptr++
+	}
+	return len
+}
+
+function cstr_by_ptr(mbuf, ptr) {
+	const mem= new Uint8Array(mbuf)
+	const len= cstrlen(mem,ptr)
+	const bytes= new Uint8Array(mbuf,ptr,len)
+	return new TextDecoder().decode(bytes)
+}
+
+function color_hex_unpacked(r, g, b, a) {
+	r=r.toString(16).padStart(2,'0')
+	g=g.toString(16).padStart(2,'0')
+	b=b.toString(16).padStart(2,'0')
+	a=a.toString(16).padStart(2,'0')
+	return "#"+r+g+b+a
+}
+
+function getColorFromMemory(buf,ptr) {
+	const [r,g,b,a] = new Uint8Array(buf,ptr,4)
+	return color_hex_unpacked(r,g,b,a)
 }
 
 class api{
 	api_proxy(){
-		return make_environment(this);
+		return make_environment(this)
 	}
-	api_reset( wasm, id ) {
-		this.wasm = wasm;
-		this.canvas = document.getElementById(id);
-		this.ctx = this.canvas.getContext("2d");
-		console.log(this.ctx);
-		this.wasm.instance.exports.main();
-		const next = (timestamp) => {
+	api_reset( wasm, id ){
+		this.elts=[]
+		this.wasm = wasm
+		this.canvas = document.getElementById(id)
+		this.ctx = this.canvas.getContext("2d")
+		this.wasm.instance.exports.main()
+		const next = (timestamp)=>{
 			if (this.quit) {
 				return;
 			}
-			this.dt = (timestamp - this.previous)/1000.0;
-			this.previous = timestamp;
-			this.entryFunction();
-			window.requestAnimationFrame(next);
+			this.dt = (timestamp - this.previous)/1000.0
+			this.previous = timestamp
+			this.entryFunction()
+			window.requestAnimationFrame(next)
 		};
-		window.requestAnimationFrame((timestamp) => {
-			this.previous = timestamp;
-			window.requestAnimationFrame(next);
+		window.requestAnimationFrame((timestamp)=>{
+			this.previous = timestamp
+			window.requestAnimationFrame(next)
 		});
 	}
 '''
 
+
 raylib_like_api = {
 	'InitWindow' : '''
-	InitWindow(width, height, title_ptr) {
-		this.ctx.canvas.width = width;
-		this.ctx.canvas.height = height;
-		const buffer = this.wasm.instance.exports.memory.buffer;
-		document.title = cstr_by_ptr(buffer, title_ptr);
+	InitWindow(w,h,ptr){
+		this.ctx.canvas.width=w
+		this.ctx.canvas.height=h
+		const buf=this.wasm.instance.exports.memory.buffer
+		document.title = cstr_by_ptr(buf,ptr)
 	}
 	''',
 	'GetScreenWidth':'''
-	GetScreenWidth() {
-		return this.ctx.canvas.width;
+	GetScreenWidth(){
+		return this.ctx.canvas.width
 	}
 	''',
 
 	'GetScreenHeight':'''
-	GetScreenHeight() {
-		return this.ctx.canvas.height;
+	GetScreenHeight(){
+		return this.ctx.canvas.height
 	}
 	''',
 
 	'GetFrameTime':'''
-	GetFrameTime() {
-		return Math.min(this.dt, 1.0/60);
+	GetFrameTime(){
+		return Math.min(this.dt, 1.0/60)
 	}
 	''',
 
 	'DrawRectangleV':'''
-	DrawRectangleV(position_ptr, size_ptr, color_ptr) {
-		const buffer = this.wasm.instance.exports.memory.buffer;
-		const color = getColorFromMemory(buffer, color_ptr);
-		const position = new Float32Array(buffer, position_ptr, 2);
-		const size = new Float32Array(buffer, size_ptr, 2);
-		this.ctx.fillStyle = color;
-		this.ctx.fillRect(position[0], position[1], size[0], size[1]);
+	DrawRectangleV(pptr,sptr,cptr){
+		const buf=this.wasm.instance.exports.memory.buffer
+		const clr=getColorFromMemory(buf, cptr)
+		const p=new Float32Array(buf,pptr,2)
+		const s=new Float32Array(buf,sptr,2)
+		this.ctx.fillStyle = color
+		this.ctx.fillRect(p[0],p[1],s[0],s[1])
 	}
 	''',
 
 	'DrawSplineLinearWASM':'''
-	DrawSplineLinearWASM(points_ptr, pointCount, thick, fill, r,g,b,a){
-		const buffer = this.wasm.instance.exports.memory.buffer;
-		const points = new Float32Array(buffer, points_ptr, pointCount*2);
-		this.ctx.strokeStyle = 'black';
-		if (fill) this.ctx.fillStyle = 'rgba('+(r*255)+','+(g*255)+','+(b*255)+',' + a + ')';
-		this.ctx.lineWidth = thick;
-		this.ctx.beginPath();
-		this.ctx.moveTo(points[0], points[1]);
-		for (var i=2; i<points.length; i+=2){
-			this.ctx.lineTo(points[i], points[i+1]);
+	DrawSplineLinearWASM(ptr,len,thick,fill, r,g,b,a){
+		const buf = this.wasm.instance.exports.memory.buffer
+		const p = new Float32Array(buf,ptr,len*2)
+		this.ctx.strokeStyle = 'black'
+		if(fill) this.ctx.fillStyle='rgba('+(r*255)+','+(g*255)+','+(b*255)+','+a+')'
+		this.ctx.lineWidth=thick
+		this.ctx.beginPath()
+		this.ctx.moveTo(p[0], p[1])
+		for (var i=2; i<p.length; i+=2){
+			this.ctx.lineTo(p[i], p[i+1])
 		}
 		if (fill){
-			this.ctx.closePath();
-			this.ctx.fill();
+			this.ctx.closePath()
+			this.ctx.fill()
 		}
-		this.ctx.stroke();
+		this.ctx.stroke()
 	}
 	''',
 
 	'DrawCircleWASM':'''
-	DrawCircleWASM(x, y, radius, color_ptr) {
-		const buffer = this.wasm.instance.exports.memory.buffer;
-		const [r, g, b, a] = new Uint8Array(buffer, color_ptr, 4);
-		const color = color_hex_unpacked(r, g, b, a);
-		this.ctx.strokeStyle = 'black';
-		this.ctx.beginPath();
-		this.ctx.arc(x, y, radius, 0, 2*Math.PI, false);
-		this.ctx.fillStyle = color;
-		this.ctx.closePath();
-		this.ctx.stroke();
+	DrawCircleWASM(x,y,rad,ptr){
+		const buf=this.wasm.instance.exports.memory.buffer
+		const [r,g,b,a]=new Uint8Array(buf, ptr, 4)
+		const color = color_hex_unpacked(r,g,b,a)
+		this.ctx.strokeStyle = 'black'
+		this.ctx.beginPath()
+		this.ctx.arc(x,y,rad,0,2*Math.PI,false)
+		this.ctx.fillStyle = color
+		this.ctx.closePath()
+		this.ctx.stroke()
 	}
 	''',
 
 	'ClearBackground':'''
-	ClearBackground(color_ptr) {
-		this.ctx.fillStyle = getColorFromMemory(this.wasm.instance.exports.memory.buffer, color_ptr);
-		this.ctx.fillRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+	ClearBackground(ptr) {
+		this.ctx.fillStyle = getColorFromMemory(this.wasm.instance.exports.memory.buffer, ptr)
+		this.ctx.fillRect(0,0,this.ctx.canvas.width,this.ctx.canvas.height)
 	}
 	''',
 
 	'raylib_js_set_entry':'''
-	raylib_js_set_entry(entry) {
-		this.entryFunction = this.wasm.instance.exports.__indirect_function_table.get(entry);
+	raylib_js_set_entry(f) {
+		this.entryFunction = this.wasm.instance.exports.__indirect_function_table.get(f)
 	}
 	''',
 
 	'':'''
-	GetRandomValue(min, max) {
-		return min + Math.floor(Math.random()*(max - min + 1));
+	GetRandomValue(min,max) {
+		return min+Math.floor(Math.random()*(max-min+1))
 	}
 	''',
 
@@ -981,6 +984,10 @@ def gen_js_api(c3):
 	skip = []
 	if 'raylib::color_from_hsv' not in c3:
 		skip.append('ColorFromHSV')
+	if 'raylib::draw_circle_wasm' not in c3:
+		skip.append('DrawCircleWASM')
+	if 'raylib::draw_rectangle_v' not in c3:
+		skip.append('DrawRectangleV')
 
 	js = [
 		JS_LIB_API,
@@ -994,6 +1001,35 @@ def gen_js_api(c3):
 	js.append('new api()')
 	return '\n'.join(js)
 
+def compress_js(js):
+	assert '`' not in js
+	js = js.replace('\t', '')
+	js = js.replace('this.ctx', 'this.c').replace('const ', 'let ')
+	rep = [
+		'this.c.', 'this.', 'wasm.instance.exports.', 'new Uint8Array', 'new Float32Array', 
+		'window.requestAnimationFrame', 'function', 'return ', 'canvas.', 'getColorFromMemory',
+		'.toString(16).padStart',
+	]
+	o = []
+	if 1:
+		vars = []
+		for idx, r in enumerate(rep):
+			if idx == 0:
+				key = '_'
+			else:
+				key = '_%s' % idx
+			vars.append('%s="%s"' % (key, r))
+			js = js.replace(r, '${%s}' % key)
+		o.append('var %s;' % ','.join(vars) )
+		o.append('eval`%s`' % js)
+		return '\n'.join(o)
+	else:
+		ascii_bytes = [chr(i) for i in list(range(1,10))+list(range(14,31))]
+		for idx, r in enumerate(rep):
+			js = js.replace(r, ascii_bytes.pop())
+
+		return js
+
 def gen_html(wasm, c3, user_html=None):
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
 	print(cmd)
@@ -1004,12 +1040,29 @@ def gen_html(wasm, c3, user_html=None):
 
 	jtmp = '/tmp/c3api.js'
 	jslib = gen_js_api(c3)
+
+	if False:
+		## after gz this will be a few bytes bigger
+		jslibcomp = compress_js(jslib)
+		print(jslibcomp)
+		print('jslib bytes:', len(jslib))
+		print('compressed:', len(jslibcomp))
+
 	open(jtmp,'w').write(jslib)
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
 	print(cmd)
 	subprocess.check_call(cmd)
 	js = open(jtmp+'.gz','rb').read()
 	jsb = base64.b64encode(js).decode('utf-8')
+
+	jtmp = '/tmp/c3api.comp.js'
+	open(jtmp,'w').write(jslib)
+	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
+	print(cmd)
+	subprocess.check_call(cmd)
+	jsc = open(jtmp+'.gz','rb').read()
+	print('compressed.gz:', len(jsc))
+
 
 	o = [
 		'<html>',
@@ -1034,7 +1087,7 @@ def gen_html(wasm, c3, user_html=None):
 		'wasm bytes=%s' % len(wa),
 		'gzip bytes=%s' % len(w),
 		'base64 bytes=%s' % len(b),
-		'html+js bytes=%s' % (hsize-len(b)),
+		'html bytes=%s' % (hsize- (len(b)+len(jsb)) ),
 		'total bytes=%s' % hsize,
 		'C3 optimization=%s' % WORLD.c3_export_opt,
 
