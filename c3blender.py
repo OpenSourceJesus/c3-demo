@@ -122,13 +122,6 @@ const Vector2 GRAVITY = {0, 1000};
 const int N = 10;
 const float COLLISION_DAMP = 1;
 
-struct Object {
-	Vector2 position;
-	Vector2 velocity;
-	Vector2 scale;
-	Color color;
-}
-
 bitstruct Vector2_4bits : ichar {
 	ichar x : 4..7;
 	ichar y : 0..3;
@@ -164,6 +157,22 @@ struct Vector2_16bits @packed {
 
 '''
 
+HEADER_OBJECT = '''
+struct Object {
+	Vector2 position;
+	Vector2 velocity;
+	Vector2 scale;
+	Color color;
+	int id;
+}
+'''
+
+HEADER_OBJECT_WASM = '''
+fn void Object.set_text(Object *obj, char *txt) {
+	html_set_text(obj.id, txt);
+}
+'''
+
 MAIN_WASM = '''
 	raylib::init_window(%s, %s, "Hello, from C3 WebAssembly");
 	raylib_js_set_entry(&game_frame);
@@ -188,7 +197,7 @@ def is_maybe_circle(ob):
 def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
-def blender_to_c3(world, wasm=False, html=None):
+def blender_to_c3(world, wasm=False, html=None, use_html=False):
 	resx = world.c3_export_res_x
 	resy = world.c3_export_res_y
 	SCALE = world.c3_export_scale
@@ -196,20 +205,30 @@ def blender_to_c3(world, wasm=False, html=None):
 	offy = world.c3_export_offset_y
 
 	unpackers = {}
-	head  = [HEADER]
+	head  = [HEADER, HEADER_OBJECT]
 	if wasm:
-		head.append('extern fn void draw_circle_wasm(int x, int y, float radius, Color color) @extern("DrawCircleWASM");')
-		head.append('extern fn void draw_spline_wasm(Vector2 *points, int pointCount, float thick, int use_fill, float r, float g, float b, float a) @extern("DrawSplineLinearWASM");')
+		head.append(HEADER_OBJECT_WASM)
+		head.append('extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");')
+		head.append('extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, float r, float g, float b, float a) @extern("DrawSplineLinearWASM");')
+
+		head.append('extern fn int html_new (char *ptr) @extern("html_new");')
+		head.append('extern fn int html_new_text (char *ptr, float x, float y, float sz) @extern("html_new_text");')
+		head.append('extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");')
+		head.append('extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");')
+
+
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
 		'fn void game_frame() @wasm {',
 		'	Object self;',
+		#'	int __self__;',
 		'	float dt = raylib::get_frame_time();',
 	]
 	if not wasm:
 		draw.append('	raylib::begin_drawing();')
 	draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
 	meshes = []
+	tobjects = []
 	datas = {}
 	for ob in bpy.data.objects:
 		if ob.hide_get(): continue
@@ -268,10 +287,50 @@ def blender_to_c3(world, wasm=False, html=None):
 				grease_to_c3_raylib(ob, datas, head, draw, setup)
 
 		elif ob.type=='FONT' and wasm:
+			#idx = len(tobjects)
+			#tobjects.append(ob)
+
+
 			cscale = ob.data.size*SCALE
-			css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %(x+(cscale*0.1),z-cscale, cscale)
-			div = '<div id="%s" style="%s">%s</div>' %(sname, css, ob.data.body)
-			html.append(div)
+			if use_html:
+				css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %(x+(cscale*0.1),z-cscale, cscale)
+				div = '<div id="%s" style="%s">%s</div>' %(sname, css, ob.data.body)
+				html.append(div)
+				continue
+
+			meshes.append(ob)
+			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
+
+
+			setup += [
+				#'int _elt = html_new("div");',
+				#'html_set_text(_elt, "%s");' %ob.data.body,
+				#'html_set_position(_elt, %s,%s);' %(x+(cscale*0.1),z-cscale),
+				#'text_objects[%s] = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-cscale, cscale)
+
+				'objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-cscale, cscale)
+
+			]
+			#draw.append('	__self__ = text_objects[%s];' % idx)
+			draw.append('	self = objects[%s];' % idx)
+
+			if scripts:
+				props = {}
+				for prop in ob.keys():
+					if prop.startswith( ('_', 'c3_') ): continue
+					head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
+					props[prop] = ob[prop]
+
+				## user C3 scripts
+				for s in scripts:
+					for prop in props:
+						if 'self.'+prop in s:
+							s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
+					#if 'self.set_text(' in s:
+					#	s = s.replace('self.set_text(', 'html_set_text(__self__,')
+					draw.append('\t' + s)
+
+
 
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
@@ -284,6 +343,8 @@ def blender_to_c3(world, wasm=False, html=None):
 	draw.append('}')
 
 	head.append('Object[%s] objects;' % len(meshes))
+	if tobjects:
+		head.append('int[%s] text_objects;' % len(tobjects))
 	if unpackers:
 		for gkey in unpackers:
 			head += unpackers[gkey]
@@ -851,6 +912,49 @@ class api{
 '''
 
 
+c3dom_api = {
+	'html_new_div' : '''
+	html_new(ptr){
+		var elt=document.createElement(cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr))
+		elt.style.position='absolute'
+		this.elts.push(elt)
+		document.body.appendChild(elt)
+		return this.elts.length-1
+	}
+	''',
+
+	'html_new_text' : '''
+	html_new_text(ptr, x,y, sz){
+		var elt=document.createElement('div')
+		elt.style.position='absolute'
+		elt.style.left=x
+		elt.style.top=y
+		elt.style.fontSize=sz
+		this.elts.push(elt)
+		document.body.appendChild(elt)
+		elt.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr))
+		return this.elts.length-1
+	}
+	''',
+
+
+	'html_set_text':'''
+	html_set_text(idx, ptr){
+		var elt = this.elts[idx]
+		var txt = cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr)
+		elt.firstChild.nodeValue=txt
+	}
+	''',
+	'html_set_position':'''
+	html_set_position(idx, x, y){
+		var elt = this.elts[idx]
+		elt.style.left = x
+		elt.style.top = y
+	}
+	'''
+
+}
+
 raylib_like_api = {
 	'InitWindow' : '''
 	InitWindow(w,h,ptr){
@@ -881,10 +985,9 @@ raylib_like_api = {
 	'DrawRectangleV':'''
 	DrawRectangleV(pptr,sptr,cptr){
 		const buf=this.wasm.instance.exports.memory.buffer
-		const clr=getColorFromMemory(buf, cptr)
 		const p=new Float32Array(buf,pptr,2)
 		const s=new Float32Array(buf,sptr,2)
-		this.ctx.fillStyle = color
+		this.ctx.fillStyle = getColorFromMemory(buf, cptr)
 		this.ctx.fillRect(p[0],p[1],s[0],s[1])
 	}
 	''',
@@ -913,11 +1016,10 @@ raylib_like_api = {
 	DrawCircleWASM(x,y,rad,ptr){
 		const buf=this.wasm.instance.exports.memory.buffer
 		const [r,g,b,a]=new Uint8Array(buf, ptr, 4)
-		const color = color_hex_unpacked(r,g,b,a)
 		this.ctx.strokeStyle = 'black'
 		this.ctx.beginPath()
 		this.ctx.arc(x,y,rad,0,2*Math.PI,false)
-		this.ctx.fillStyle = color
+		this.ctx.fillStyle = color_hex_unpacked(r,g,b,a)
 		this.ctx.closePath()
 		this.ctx.stroke()
 	}
@@ -984,7 +1086,7 @@ def gen_js_api(c3):
 	skip = []
 	if 'raylib::color_from_hsv' not in c3:
 		skip.append('ColorFromHSV')
-	if 'raylib::draw_circle_wasm' not in c3:
+	if 'draw_circle_wasm(' not in c3:
 		skip.append('DrawCircleWASM')
 	if 'raylib::draw_rectangle_v' not in c3:
 		skip.append('DrawRectangleV')
@@ -997,6 +1099,11 @@ def gen_js_api(c3):
 			print('skipping:', fname)
 			continue
 		js.append(raylib_like_api[fname])
+
+	for fname in c3dom_api:
+		if fname+'(' in c3:
+			js.append(c3dom_api[fname])
+
 	js.append('}')
 	js.append('new api()')
 	return '\n'.join(js)
@@ -1006,12 +1113,12 @@ def compress_js(js):
 	js = js.replace('\t', '')
 	js = js.replace('this.ctx', 'this.c').replace('const ', 'let ')
 	rep = [
-		'this.c.', 'this.', 'wasm.instance.exports.', 'new Uint8Array', 'new Float32Array', 
-		'window.requestAnimationFrame', 'function', 'return ', 'canvas.', 'getColorFromMemory',
-		'.toString(16).padStart',
+		'this.c.', 'this.wasm.instance.exports.memory.buffer', 'this.', 'Uint8Array', 'Float32Array', 
+		'window.requestAnimationFrame', 'function', 'return', 'canvas.', 
+		#'getColorFromMemory','.toString(16).padStart',
 	]
 	o = []
-	if 1:
+	if 0:
 		vars = []
 		for idx, r in enumerate(rep):
 			if idx == 0:
@@ -1024,11 +1131,28 @@ def compress_js(js):
 		o.append('eval`%s`' % js)
 		return '\n'.join(o)
 	else:
-		ascii_bytes = [chr(i) for i in list(range(1,10))+list(range(14,31))]
+		o=[
+		#'String.prototype.r=(a)=>{',
+		'	function $r(r,a){',
+		'	for(k in a){',
+		'		r=r.replaceAll(String.fromCharCode(k), a[k])',
+		'	}',
+		'	return r',
+		'}',
+		]
+		#ascii_bytes = [chr(i) for i in list(range(1,10))+list(range(14,31))]
+		#ascii_bytes.reverse()
+		ascii_bytes = [chr(i) for i in range(1,10)]
+		g = []
 		for idx, r in enumerate(rep):
-			js = js.replace(r, ascii_bytes.pop())
+			bite = ascii_bytes.pop()
+			js = js.replace(r, bite)
+			#g[ord(bite)] = r
+			g.append(r)
 
-		return js
+
+		o.append('var _$_=$r(`%s`,"%s".split(" "))' %(js, ' '.join(g) ))
+		return '\n'.join(o)
 
 def gen_html(wasm, c3, user_html=None):
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
@@ -1041,7 +1165,7 @@ def gen_html(wasm, c3, user_html=None):
 	jtmp = '/tmp/c3api.js'
 	jslib = gen_js_api(c3)
 
-	if False:
+	if 1:
 		## after gz this will be a few bytes bigger
 		jslibcomp = compress_js(jslib)
 		print(jslibcomp)
@@ -1056,12 +1180,13 @@ def gen_html(wasm, c3, user_html=None):
 	jsb = base64.b64encode(js).decode('utf-8')
 
 	jtmp = '/tmp/c3api.comp.js'
-	open(jtmp,'w').write(jslib)
+	open(jtmp,'w').write(jslibcomp)
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
 	print(cmd)
 	subprocess.check_call(cmd)
 	jsc = open(jtmp+'.gz','rb').read()
 	print('compressed.gz:', len(jsc))
+	jsbc = base64.b64encode(jsc).decode('utf-8')
 
 
 	o = [
@@ -1084,6 +1209,10 @@ def gen_html(wasm, c3, user_html=None):
 		'jslib bytes=%s' % len(jslib),
 		'jslib.gz bytes=%s' % len(js),
 		'jslib.base64 bytes=%s' % len(jsb),
+
+		'jslib.comp.gz bytes=%s' % len(jsc),
+		'jslib.comp.base64 bytes=%s' % len(jsbc),
+
 		'wasm bytes=%s' % len(wa),
 		'gzip bytes=%s' % len(w),
 		'base64 bytes=%s' % len(b),
