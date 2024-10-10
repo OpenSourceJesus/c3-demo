@@ -114,8 +114,6 @@ if not bpy:
 	print('run: python3 c3blender.py --blender')
 	sys.exit()
 
-#const Vector2 PLAYER_SIZE = {100, 100};
-
 HEADER = '''
 import raylib;
 def Entry = fn void();
@@ -154,8 +152,6 @@ bitstruct Vector2_7bits : int {
 	ichar y2 : 0..3;    // 4bits
 }
 
-
-
 struct Vector2_8bits @packed {
 	ichar x;
 	ichar y;
@@ -166,10 +162,7 @@ struct Vector2_16bits @packed {
 	short y;
 }
 
-
 '''
-
-
 
 MAIN_WASM = '''
 	raylib::init_window(%s, %s, "Hello, from C3 WebAssembly");
@@ -195,7 +188,7 @@ def is_maybe_circle(ob):
 def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
-def blender_to_c3(world, wasm=False):
+def blender_to_c3(world, wasm=False, html=None):
 	resx = world.c3_export_res_x
 	resy = world.c3_export_res_y
 	SCALE = world.c3_export_scale
@@ -219,6 +212,7 @@ def blender_to_c3(world, wasm=False):
 	meshes = []
 	datas = {}
 	for ob in bpy.data.objects:
+		if ob.hide_get(): continue
 		sname = safename(ob)
 		x,y,z = ob.location * SCALE
 		z = -z
@@ -273,6 +267,12 @@ def blender_to_c3(world, wasm=False):
 			else:
 				grease_to_c3_raylib(ob, datas, head, draw, setup)
 
+		elif ob.type=='FONT' and wasm:
+			cscale = ob.data.size*SCALE
+			css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %(x+(cscale*0.1),z-cscale, cscale)
+			div = '<div id="%s" style="%s">%s</div>' %(sname, css, ob.data.body)
+			html.append(div)
+
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
 	else:
@@ -300,8 +300,8 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 
 	dname = safename(ob.data)
 	gquant = False
-	if ob.c3_grease_quantize != '32bits':
-		gquant = ob.c3_grease_quantize
+	if ob.data.c3_grease_quantize != '32bits':
+		gquant = ob.data.c3_grease_quantize
 
 	gopt = ob.data.c3_grease_optimize
 
@@ -377,37 +377,6 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 				head += gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy)
 
 
-def gen_delta_delta_unpacker_BAD(ob, dname, gquant, SCALE, qs, offx, offy):
-	x,y,z = ob.location * SCALE
-	sx,sy,sz = ob.scale
-	gkey = (dname, gquant)
-	return [
-		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
-		'	int j=0;',
-		'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
-		'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
-		'	for (int i=0; i<len; i++){',
-		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs*sx, offx+x),
-		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' % (qs*sz, offy+z),
-
-		'		j++;',
-		'		out[j].y = ay;',
-		'		out[j].x = ax;',
-
-		'		j++;',
-		'		out[j].x = ax - pak[i].x1;',
-		'		out[j].y = ay - pak[i].y1;',
-
-		'		j++;',
-		'		out[j].x = ax - pak[i].x2;',
-		'		out[j].y = ay - pak[i].y2;',
-
-		'	}',
-		'}'
-	]
-
-
-
 def gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
 	x,y,z = ob.location * SCALE
 	sx,sy,sz = ob.scale
@@ -420,7 +389,6 @@ def gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
 		'	for (int i=0; i<len; i++){',
 		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs*sx, offx+x),
 		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' % (qs*sz, offy+z),
-		#'		float ax = pak[i].x0'
 
 		'		j++;',
 		'		out[j].x = ax;',
@@ -434,10 +402,6 @@ def gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
 		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' % (qs*sx, offx+x),
 		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' % (qs*sz, offy+z),
 
-
-		#'		j++;',
-		#'		out[j].x = ax - pak[i].x2;',
-		#'		out[j].y = ay - pak[i].y2;',
 
 		'	}',
 		'}'
@@ -471,8 +435,8 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 
 	dname = safename(ob.data)
 	gquant = False
-	if ob.c3_grease_quantize != '32bits':
-		gquant = ob.c3_grease_quantize
+	if ob.data.c3_grease_quantize != '32bits':
+		gquant = ob.data.c3_grease_quantize
 
 	if dname not in datas:
 		datas[dname]=0
@@ -1030,7 +994,7 @@ def gen_js_api(c3):
 	js.append('new api()')
 	return '\n'.join(js)
 
-def gen_html(wasm, c3):
+def gen_html(wasm, c3, user_html=None):
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
 	print(cmd)
 	subprocess.check_call(cmd)
@@ -1057,7 +1021,8 @@ def gen_html(wasm, c3):
 		JS_DECOMP, 
 		'</script>',
 	]
-
+	if user_html:
+		o += user_html
 
 	hsize = len('\n'.join(o)) + len('</body></html>')
 
@@ -1076,7 +1041,7 @@ def gen_html(wasm, c3):
 	]
 	for ob in bpy.data.objects:
 		if ob.type=='GPENCIL':
-			o.append('%s = %s' % (ob.name, ob.c3_grease_quantize))
+			o.append('%s = %s' % (ob.name, ob.data.c3_grease_quantize))
 
 	o += [
 		'<pre>',
@@ -1093,7 +1058,8 @@ def build_wasm( world ):
 	global SERVER_PROC, WORLD
 	WORLD = world
 	if SERVER_PROC: SERVER_PROC.kill()
-	o = blender_to_c3(world, wasm=True)
+	user_html = []
+	o = blender_to_c3(world, wasm=True, html=user_html)
 	o = '\n'.join(o)
 	#print(o)
 	tmp = '/tmp/c3blender.c3'
@@ -1101,7 +1067,7 @@ def build_wasm( world ):
 	wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt)
 	#os.system('cp -v ./index.html /tmp/.')
 	#os.system('cp -v ./raylib.js /tmp/.')
-	html = gen_html(wasm, o)
+	html = gen_html(wasm, o, user_html)
 	open('/tmp/index.html', 'w').write(html)
 	cmd = ['python', '-m', 'http.server', '6969']
 	SERVER_PROC = subprocess.Popen(cmd, cwd='/tmp')
@@ -1132,7 +1098,7 @@ bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
 )
 
 bpy.types.GreasePencil.c3_grease_optimize = bpy.props.IntProperty(name="grease pencil optimize", min=0, max=8)
-bpy.types.Object.c3_grease_quantize = bpy.props.EnumProperty(
+bpy.types.GreasePencil.c3_grease_quantize = bpy.props.EnumProperty(
 	name='quantize',
 	items=[
 		("32bits", "32bits", "32bit vertices"), 
@@ -1172,7 +1138,7 @@ class C3ScriptsPanel(bpy.types.Panel):
 		ob = context.active_object
 		if ob.type=='GPENCIL':
 			self.layout.prop(ob.data, 'c3_grease_optimize')
-			self.layout.prop(ob, 'c3_grease_quantize')
+			self.layout.prop(ob.data, 'c3_grease_quantize')
 
 		self.layout.label(text="Attach C3 Scripts")
 		self.layout.prop(ob, "c3_script_init")
@@ -1204,19 +1170,22 @@ class C3MaterialPanel(bpy.types.Panel):
 		self.layout.prop(mat, 'c3_export_trifan')
 		self.layout.prop(mat, 'c3_export_tristrip')
 
-
-
 if __name__=='__main__':
-	q = None
-	o = None
+	q = o = test = None
 	for arg in sys.argv:
 		if arg.endswith('bits'):
 			q = arg.split('--')[-1]
 		elif arg.startswith('--stroke-opt='):
 			o = arg.split('=')[-1]
-	if '--test' in sys.argv:
+		elif arg.startswith('--test='):
+			test = arg.split('=')[-1]
+
+	if '--test' in sys.argv or test:
 		import c3blendgen
-		c3blendgen.gen_test_scene(q,o)
+		if test:
+			getattr(c3blendgen,test)(q,o)
+		else:
+			c3blendgen.gen_test_scene(q,o)
 	if '--wasm' in sys.argv:
 		build_wasm( bpy.data.worlds[0] )
 	elif '--linux' in sys.argv:
