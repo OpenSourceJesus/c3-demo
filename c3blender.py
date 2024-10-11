@@ -171,6 +171,10 @@ HEADER_OBJECT_WASM = '''
 fn void Object.set_text(Object *obj, char *txt) {
 	html_set_text(obj.id, txt);
 }
+fn void Object.css_scale(Object *obj, float scale) {
+	html_css_scale(obj.id, scale);
+}
+
 '''
 
 MAIN_WASM = '''
@@ -215,12 +219,14 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		head.append('extern fn int html_new_text (char *ptr, float x, float y, float sz) @extern("html_new_text");')
 		head.append('extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");')
 		head.append('extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");')
+		head.append('extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");')
 
 
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
 		'fn void game_frame() @wasm {',
 		'	Object self;',
+		'	Object parent;',
 		#'	int __self__;',
 		'	float dt = raylib::get_frame_time();',
 	]
@@ -248,6 +254,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 
 
 		if ob.type=="MESH":
+			ob['c3_index'] = idx
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
@@ -301,6 +308,9 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 
+			if ob.parent:
+				x,y,z = ob.location * SCALE
+				z = -z
 
 			setup += [
 				#'int _elt = html_new("div");',
@@ -308,7 +318,13 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 				#'html_set_position(_elt, %s,%s);' %(x+(cscale*0.1),z-cscale),
 				#'text_objects[%s] = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-cscale, cscale)
 
-				'objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-cscale, cscale)
+				#'	objects[%s].position={%s,%s};' % (idx, x,z),
+				'	objects[%s].position={%s,%s};' % (idx, x+(cscale*0.1),z-(cscale*1.8)),
+
+
+				#'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-cscale, cscale)
+				#'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x,z, cscale)
+				'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale)
 
 			]
 			#draw.append('	__self__ = text_objects[%s];' % idx)
@@ -329,6 +345,15 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 					#if 'self.set_text(' in s:
 					#	s = s.replace('self.set_text(', 'html_set_text(__self__,')
 					draw.append('\t' + s)
+
+			if ob.parent:
+				draw += [
+					'parent = objects[%s];' % ob.parent['c3_index'],
+					#'self.position.x=parent.position.x;',
+					#'self.position.y=parent.position.y;',
+					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
+				]
+
 
 
 
@@ -925,7 +950,8 @@ c3dom_api = {
 
 	'html_new_text' : '''
 	html_new_text(ptr, x,y, sz){
-		var elt=document.createElement('div')
+		var elt=document.createElement('pre')
+		elt.style.transformOrigin='left'
 		elt.style.position='absolute'
 		elt.style.left=x
 		elt.style.top=y
@@ -945,6 +971,13 @@ c3dom_api = {
 		elt.firstChild.nodeValue=txt
 	}
 	''',
+
+	'html_css_scale':'''
+	html_css_scale(idx, sz){
+		this.elts[idx].style.transform='scale('+sz+')'
+	}
+	''',
+
 	'html_set_position':'''
 	html_set_position(idx, x, y){
 		var elt = this.elts[idx]
