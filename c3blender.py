@@ -221,6 +221,9 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		head.append('extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");')
 		head.append('extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");')
 
+		head.append('extern fn void html_set_zindex (int id, int z) @extern("html_set_zindex");')
+		head.append('extern fn void html_canvas_clear (int id, int z) @extern("html_canvas_clear");')
+
 
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
@@ -230,9 +233,11 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		#'	int __self__;',
 		'	float dt = raylib::get_frame_time();',
 	]
-	if not wasm:
+	if wasm:
+		draw.append('	raylib::clear_background({0x00, 0x00, 0x00, 0x00});')
+	else:
 		draw.append('	raylib::begin_drawing();')
-	draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
+		draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
 	meshes = []
 	tobjects = []
 	datas = {}
@@ -286,6 +291,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 			else:
 				draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
 		elif ob.type=='GPENCIL':
+			ob['c3_index'] = idx
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			if wasm:
@@ -327,6 +333,12 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 				'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale)
 
 			]
+			if wasm:
+				if ob.location.y >= 0.1:
+					setup.append('	html_set_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y*10)))
+				elif ob.location.y <= -0.1:
+					setup.append('	html_set_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
+
 			#draw.append('	__self__ = text_objects[%s];' % idx)
 			draw.append('	self = objects[%s];' % idx)
 
@@ -984,7 +996,19 @@ c3dom_api = {
 		elt.style.left = x
 		elt.style.top = y
 	}
-	'''
+	''',
+
+	'html_set_zindex':'''
+	html_set_zindex(idx, z){
+		this.elts[idx].style.zIndex = z
+	}
+	''',
+
+	'html_canvas_clear':'''
+	html_canvas_clear(ptr) {
+		this.ctx.clearRect(0,0,this.ctx.canvas.width,this.ctx.canvas.height)
+	}
+	''',
 
 }
 
@@ -1187,7 +1211,7 @@ def compress_js(js):
 		o.append('var _$_=$r(`%s`,"%s".split(" "))' %(js, ' '.join(g) ))
 		return '\n'.join(o)
 
-def gen_html(wasm, c3, user_html=None):
+def gen_html(wasm, c3, user_html=None, background='', test_precomp=False):
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
 	print(cmd)
 	subprocess.check_call(cmd)
@@ -1198,7 +1222,7 @@ def gen_html(wasm, c3, user_html=None):
 	jtmp = '/tmp/c3api.js'
 	jslib = gen_js_api(c3)
 
-	if 1:
+	if test_precomp:
 		## after gz this will be a few bytes bigger
 		jslibcomp = compress_js(jslib)
 		print(jslibcomp)
@@ -1212,19 +1236,24 @@ def gen_html(wasm, c3, user_html=None):
 	js = open(jtmp+'.gz','rb').read()
 	jsb = base64.b64encode(js).decode('utf-8')
 
-	jtmp = '/tmp/c3api.comp.js'
-	open(jtmp,'w').write(jslibcomp)
-	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
-	print(cmd)
-	subprocess.check_call(cmd)
-	jsc = open(jtmp+'.gz','rb').read()
-	print('compressed.gz:', len(jsc))
-	jsbc = base64.b64encode(jsc).decode('utf-8')
+	if test_precomp:
+		jtmp = '/tmp/c3api.comp.js'
+		open(jtmp,'w').write(jslibcomp)
+		cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
+		print(cmd)
+		subprocess.check_call(cmd)
+		jsc = open(jtmp+'.gz','rb').read()
+		print('compressed.gz:', len(jsc))
+		jsbc = base64.b64encode(jsc).decode('utf-8')
 
+	if '--debug' in sys.argv:
+		background = 'red'
+	if background:
+		background = 'style="background-color:%s"' % background
 
 	o = [
 		'<html>',
-		'<body>',
+		'<body %s>' % background,
 		'<canvas id="game"></canvas>',
 		'<script>', 
 		'var $0="%s"' % jsb,
@@ -1243,8 +1272,8 @@ def gen_html(wasm, c3, user_html=None):
 		'jslib.gz bytes=%s' % len(js),
 		'jslib.base64 bytes=%s' % len(jsb),
 
-		'jslib.comp.gz bytes=%s' % len(jsc),
-		'jslib.comp.base64 bytes=%s' % len(jsbc),
+		#'jslib.comp.gz bytes=%s' % len(jsc),
+		#'jslib.comp.base64 bytes=%s' % len(jsbc),
 
 		'wasm bytes=%s' % len(wa),
 		'gzip bytes=%s' % len(w),
@@ -1405,5 +1434,3 @@ if __name__=='__main__':
 		build_wasm( bpy.data.worlds[0] )
 	elif '--linux' in sys.argv:
 		build_linux( bpy.data.worlds[0] )
-
-
