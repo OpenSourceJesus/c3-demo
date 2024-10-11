@@ -58,9 +58,11 @@ def gen_test_scene(quant=None, wasm_simple_stroke_opt=None):
 
 EXAMPLE3 = '''
 if (raylib::get_random_value(0,100) < 10){
-	self.set_text("--");
+	self.set_text(" 👁️‍🗨️ 👁️");
+	self.css_scale(0.4);
 } else {
 	self.set_text("Oo");
+	self.css_scale(1.0);
 }
 '''
 
@@ -73,6 +75,8 @@ def test2(quant=None, wasm_simple_stroke_opt=None):
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
 	ob.data.body = 'hello world'
+	ob.location.x = 2
+	ob.location.z = 1
 	ob.rotation_euler.x = math.pi/2
 	ob.parent = cube
 
@@ -93,6 +97,14 @@ def test2(quant=None, wasm_simple_stroke_opt=None):
 	txt = bpy.data.texts.new(name='example3.c3')
 	txt.from_string(EXAMPLE3)
 	ob.c3_script0 = txt
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.data.body = '-_-/'
+	ob.data.size *= 0.5
+	ob.rotation_euler.x = math.pi/2
+	ob.location.x = -0.4
+	ob.location.z = 0.3
 
 
 
