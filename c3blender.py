@@ -177,6 +177,15 @@ fn void Object.css_scale(Object *obj, float scale) {
 
 '''
 
+WASM_HELPERS = '''
+fn void transform_spline_wasm (Vector2 *source, Vector2 *target, int len, Vector2 pos, Vector2 scl){
+	for (int i=0; i<len; i++){
+		target[i].x = (source[i].x + pos.x) * scl.x;
+		target[i].y = (source[i].y + pos.y) * scl.y;
+	}
+}
+'''
+
 MAIN_WASM = '''
 	raylib::init_window(%s, %s, "Hello, from C3 WebAssembly");
 	raylib_js_set_entry(&game_frame);
@@ -223,6 +232,9 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 
 		head.append('extern fn void html_set_zindex (int id, int z) @extern("html_set_zindex");')
 		head.append('extern fn void html_canvas_clear (int id, int z) @extern("html_canvas_clear");')
+
+		head.append(WASM_HELPERS)
+
 
 
 	setup = ['fn void main() @extern("main") @wasm {']
@@ -294,8 +306,11 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 			ob['c3_index'] = idx
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
+			sx,sy,sz = ob.scale
+			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
+
 			if wasm:
-				grease_to_c3_wasm(ob, datas, head, draw, setup)
+				grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, idx)
 			else:
 				grease_to_c3_raylib(ob, datas, head, draw, setup)
 
@@ -386,10 +401,13 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		for gkey in unpackers:
 			head += unpackers[gkey]
 
-	print(datas)
+	for dname in datas:
+		print(dname)
+		print('orig-points:', datas[dname]['orig-points'])
+		print('total-points:',datas[dname]['total-points'])
 	return head + setup + draw
 
-def grease_to_c3_wasm(ob, datas, head, draw, setup):
+def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 	SCALE = WORLD.c3_export_scale
 	offx = WORLD.c3_export_offset_x
 	offy = WORLD.c3_export_offset_y
@@ -404,11 +422,11 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 	gopt = ob.data.c3_grease_optimize
 
 	if dname not in datas:
-		datas[dname]=0
+		datas[dname]={'orig-points':0, 'total-points':0, 'draw':[]}
 		data = []
 		for lidx, layer in enumerate( ob.data.layers ):
 			for sidx, stroke in enumerate( layer.frames[0].strokes ):
-				datas[dname] += len(stroke.points)
+				datas[dname]['orig-points'] += len(stroke.points)
 				mat = ob.data.materials[stroke.material_index]
 				use_fill = 0
 				if mat.grease_pencil.show_fill: use_fill = 1
@@ -427,7 +445,7 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 					if not len(qstroke['points']):
 						print('stroke quantized away:', stroke)
 						continue
-
+					datas[dname]['total-points'] += len(qstroke['points'])
 					x0,y0,z0 = points[0].co
 					q = qstroke['q']
 					qs = qstroke['qs']
@@ -450,22 +468,34 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 				else:
 					## default 32bit floats ##
 					s = []
-					for pnt in points:
-						x1,y1,z1 = pnt.co
-						x1 *= sx
-						z1 *= sz
-						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+					if scripts:
+						for pnt in points:
+							x1,y1,z1 = pnt.co * SCALE
+							s.append('{%s,%s}' % (x1,-z1))
+					else:
+						for pnt in points:
+							x1,y1,z1 = pnt.co
+							x1 *= sx
+							z1 *= sz
+							s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
 
 					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(points),dname, lidx, sidx, ','.join(s) ))
 					n = len(s)
 
-				r,g,b,a = mat.grease_pencil.fill_color
-				swidth = calc_stroke_width(stroke)
 
 				if gquant in ('6bits', '7bits'):
-					draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n*3, swidth, use_fill, r,g,b,a))
+					nn = n*3
 				else:
-					draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, swidth, use_fill, r,g,b,a))
+					nn = n
+
+				r,g,b,a = mat.grease_pencil.fill_color
+				swidth = calc_stroke_width(stroke)
+				datas[dname]['draw'].append({'layer':lidx, 'index':sidx, 'length':nn, 'width':swidth, 'fill':use_fill, 'color':[r,g,b,a]})
+
+				#if gquant in ('6bits', '7bits'):
+				#	draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n*3, swidth, use_fill, r,g,b,a))
+				#else:
+				#	draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, swidth, use_fill, r,g,b,a))
 
 		head += data
 		if gquant:
@@ -474,6 +504,37 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup):
 			else:
 				head += gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy)
 
+	oname = sname = safename(ob)
+	if scripts:
+		draw.append('	self = objects[%s];' % obj_index)
+		props = {}
+		for prop in ob.keys():
+			if prop.startswith( ('_', 'c3_') ): continue
+			head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
+			props[prop] = ob[prop]
+
+		## user C3 scripts
+		for s in scripts:
+			for prop in props:
+				if 'self.'+prop in s:
+					s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
+			draw.append('\t' + s)
+		## save object state: from stack back to heap
+		draw.append('	objects[%s] = self;' % obj_index)
+
+	for a in datas[dname]['draw']:
+		r,g,b,alpha = a['color']
+		if not scripts:
+			## static grease pencil
+			draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r,g,b,alpha))
+		else:
+			tag = [oname, a['layer'], a['index']]
+			head.append('Vector2[%s] _%s_%s_%s;' % tuple([a['length']]+tag) )
+			dtag = [dname, a['layer'], a['index']]
+			draw += [
+				'	transform_spline_wasm(&__%s__%s_%s, &_%s_%s_%s, %s, objects[%s].position, objects[%s].scale);' %tuple(dtag+tag+[a['length'],obj_index, obj_index]),
+				'	draw_spline_wasm(&_%s_%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (oname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r,g,b,alpha)
+			]
 
 def gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
 	x,y,z = ob.location * SCALE
@@ -1137,8 +1198,6 @@ raylib_like_api = {
 }
 
 
-
-
 def gen_js_api(c3):
 	skip = []
 	if 'raylib::color_from_hsv' not in c3:
@@ -1434,3 +1493,5 @@ if __name__=='__main__':
 		build_wasm( bpy.data.worlds[0] )
 	elif '--linux' in sys.argv:
 		build_linux( bpy.data.worlds[0] )
+
+
