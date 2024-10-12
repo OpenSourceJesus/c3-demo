@@ -165,6 +165,7 @@ def test3(quant=None, wasm_simple_stroke_opt=None):
 	ob.location = [-0.6, 0.4, -3.5]
 	ob.parent = mob
 
+## object names from blender are hardcoded into the source :(
 EXAMPLE4 = '''
 document.getElementById('BUBBLE').hidden=false;
 document.getElementById('CHAT').hidden=false;
@@ -221,6 +222,7 @@ def test4(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	ob.c3_onclick = txt
 	return txt
 
+## object names from blender are abstracted away :)
 EXAMPLE5 = '''
 document.getElementById('$object0').hidden=false;
 document.getElementById('$object1').hidden=false;
