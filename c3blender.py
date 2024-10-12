@@ -164,6 +164,7 @@ struct Object {
 	Vector2 scale;
 	Color color;
 	int id;
+	bool hide;
 }
 '''
 
@@ -225,7 +226,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		head.append('extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, float r, float g, float b, float a) @extern("DrawSplineLinearWASM");')
 
 		head.append('extern fn int html_new (char *ptr) @extern("html_new");')
-		head.append('extern fn int html_new_text (char *ptr, float x, float y, float sz) @extern("html_new_text");')
+		head.append('extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");')
 		head.append('extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");')
 		head.append('extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");')
 		head.append('extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");')
@@ -261,6 +262,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 	datas = {}
 	for ob in bpy.data.objects:
 		if ob.hide_get(): continue
+		print(ob)
 		sname = safename(ob)
 		x,y,z = ob.location * SCALE
 		z = -z
@@ -268,6 +270,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		z += offy
 		sx,sy,sz = ob.scale * SCALE
 		idx = len(meshes)
+		head.append('short %s_id=%s;' % (sname,idx))
 
 		scripts = []
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
@@ -277,7 +280,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 
 
 		if ob.type=="MESH":
-			ob['c3_index'] = idx
+			#ob['c3_index'] = idx
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
@@ -309,7 +312,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 			else:
 				draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
 		elif ob.type=='GPENCIL':
-			ob['c3_index'] = idx
+			#ob['c3_index'] = idx
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			sx,sy,sz = ob.scale
@@ -333,7 +336,11 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 				continue
 
 			meshes.append(ob)
-			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
+			#setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
+			hide = 'false'
+			if ob.c3_hide:
+				setup.append('	objects[%s].hide=true;' % idx)
+				hide = 'true'
 
 			if ob.parent:
 				x,y,z = ob.location * SCALE
@@ -351,7 +358,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 
 				#'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-cscale, cscale)
 				#'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x,z, cscale)
-				'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale)
+				'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale, hide, ob.name),
 
 			]
 			if ob.c3_onclick:
@@ -388,8 +395,12 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 					draw.append('\t' + s)
 
 			if ob.parent:
+				print(ob, ob.parent)
 				draw += [
-					'parent = objects[%s];' % ob.parent['c3_index'],
+
+					#'parent = objects[%s];' % ob.parent['c3_index'],
+					'parent = objects[%s_id];' % safename(ob.parent),
+
 					#'self.position.x=parent.position.x;',
 					#'self.position.y=parent.position.y;',
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
@@ -1037,20 +1048,21 @@ c3dom_api = {
 	''',
 
 	'html_new_text' : '''
-	html_new_text(ptr, x,y, sz){
+	html_new_text(ptr, x,y, sz, viz, id){
 		var elt=document.createElement('pre')
 		elt.style.transformOrigin='left'
 		elt.style.position='absolute'
 		elt.style.left=x
 		elt.style.top=y
 		elt.style.fontSize=sz
+		elt.hidden=viz
+		elt.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer, id)
 		this.elts.push(elt)
 		document.body.appendChild(elt)
 		elt.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr))
 		return this.elts.length-1
 	}
 	''',
-
 
 	'html_set_text':'''
 	html_set_text(idx, ptr){
@@ -1457,6 +1469,7 @@ bpy.types.GreasePencil.c3_grease_quantize = bpy.props.EnumProperty(
 	]
 )
 
+bpy.types.Object.c3_hide     = bpy.props.BoolProperty( name="hidden on spawn")
 bpy.types.Object.c3_onclick     = bpy.props.PointerProperty( name="on click script", type=bpy.types.Text)
 bpy.types.Object.c3_script_init = bpy.props.PointerProperty( name="init script", type=bpy.types.Text)
 
@@ -1483,6 +1496,9 @@ class C3ScriptsPanel(bpy.types.Panel):
 		if ob.type=='GPENCIL':
 			self.layout.prop(ob.data, 'c3_grease_optimize')
 			self.layout.prop(ob.data, 'c3_grease_quantize')
+
+		self.layout.prop(ob, "c3_hide")
+		self.layout.prop(ob, "c3_onclick")
 
 		self.layout.label(text="Attach C3 Scripts")
 		self.layout.prop(ob, "c3_script_init")
