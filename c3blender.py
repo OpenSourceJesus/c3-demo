@@ -231,7 +231,12 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		head.append('extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");')
 
 		head.append('extern fn void html_set_zindex (int id, int z) @extern("html_set_zindex");')
-		head.append('extern fn void html_canvas_clear (int id, int z) @extern("html_canvas_clear");')
+		head.append('extern fn void html_canvas_clear () @extern("html_canvas_clear");')
+
+		head.append('def JSCallback = fn void( int );')
+		head.append('extern fn void html_bind_onclick (int id, JSCallback ptr, int ob_index) @extern("html_bind_onclick");')
+
+		head.append('extern fn void html_eval (char *ptr) @extern("html_eval");')
 
 		head.append(WASM_HELPERS)
 
@@ -246,7 +251,8 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		'	float dt = raylib::get_frame_time();',
 	]
 	if wasm:
-		draw.append('	raylib::clear_background({0x00, 0x00, 0x00, 0x00});')
+		#draw.append('	raylib::clear_background({0x00, 0x00, 0x00, 0x00});')  ## this fails?
+		draw.append('	html_canvas_clear();')
 	else:
 		draw.append('	raylib::begin_drawing();')
 		draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
@@ -348,11 +354,19 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 				'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale)
 
 			]
-			if wasm:
-				if ob.location.y >= 0.1:
-					setup.append('	html_set_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y*10)))
-				elif ob.location.y <= -0.1:
-					setup.append('	html_set_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
+			if ob.c3_onclick:
+				tname = safename(ob.c3_onclick)
+				head += [
+					'fn void _onclick_%s(int _index_){' % tname,
+					'	Object self = objects[_index_];',
+					ob.c3_onclick.as_string(),
+					'}',
+				]
+				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
+			if ob.location.y >= 0.1:
+				setup.append('	html_set_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y*10)))
+			elif ob.location.y <= -0.1:
+				setup.append('	html_set_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
 
 			#draw.append('	__self__ = text_objects[%s];' % idx)
 			draw.append('	self = objects[%s];' % idx)
@@ -884,6 +898,7 @@ class C3WorldPanel(bpy.types.Panel):
 		self.layout.prop(context.world, 'c3_export_offset_x')
 		self.layout.prop(context.world, 'c3_export_offset_y')
 		self.layout.prop(context.world, 'c3_export_opt')
+		self.layout.prop(context.world, 'c3_export_html')
 
 		self.layout.operator("c3.export_wasm", icon="CONSOLE")
 		if _BUILD_INFO['wasm-size']:
@@ -1065,8 +1080,25 @@ c3dom_api = {
 	}
 	''',
 
+	'html_bind_onclick':'''
+	html_bind_onclick(idx, f, oidx){
+		var func = this.wasm.instance.exports.__indirect_function_table.get(f)
+		this.elts[idx].onclick = function (){
+			func(oidx)
+		}
+	}
+	''',
+
+	'html_eval':'''
+	html_eval(ptr){
+		var _ = cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr)
+		eval(_)
+	}
+	''',
+
+
 	'html_canvas_clear':'''
-	html_canvas_clear(ptr) {
+	html_canvas_clear(){
 		this.ctx.clearRect(0,0,this.ctx.canvas.width,this.ctx.canvas.height)
 	}
 	''',
@@ -1206,6 +1238,8 @@ def gen_js_api(c3):
 		skip.append('DrawCircleWASM')
 	if 'raylib::draw_rectangle_v' not in c3:
 		skip.append('DrawRectangleV')
+	if 'raylib::clear_background' not in c3:
+		skip.append('ClearBackground')
 
 	js = [
 		JS_LIB_API,
@@ -1372,10 +1406,16 @@ def build_wasm( world ):
 	#os.system('cp -v ./raylib.js /tmp/.')
 	html = gen_html(wasm, o, user_html)
 	open('/tmp/index.html', 'w').write(html)
-	cmd = ['python', '-m', 'http.server', '6969']
-	SERVER_PROC = subprocess.Popen(cmd, cwd='/tmp')
-	atexit.register(lambda:SERVER_PROC.kill())
-	webbrowser.open('http://localhost:6969')
+	if world.c3_export_html:
+		out = os.path.expanduser(world.c3_export_html)
+		print('saving:', out)
+		open(out,'w').write(html)
+		webbrowser.open(out)
+	else:
+		cmd = ['python', '-m', 'http.server', '6969']
+		SERVER_PROC = subprocess.Popen(cmd, cwd='/tmp')
+		atexit.register(lambda:SERVER_PROC.kill())
+		webbrowser.open('http://localhost:6969')
 	return wasm
 
 bpy.types.Material.c3_export_trifan = bpy.props.BoolProperty(name="triangle fan")
@@ -1386,6 +1426,9 @@ bpy.types.World.c3_export_res_y = bpy.props.IntProperty(name="resolution Y", def
 bpy.types.World.c3_export_scale = bpy.props.FloatProperty(name="scale", default=100)
 bpy.types.World.c3_export_offset_x = bpy.props.IntProperty(name="offset X", default=100)
 bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name="offset Y", default=100)
+
+bpy.types.World.c3_export_html = bpy.props.StringProperty(name="c3 export path (.html)")
+
 bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
 	name='optimize',
 	items=[
@@ -1414,10 +1457,8 @@ bpy.types.GreasePencil.c3_grease_quantize = bpy.props.EnumProperty(
 	]
 )
 
-
-bpy.types.Object.c3_script_init = bpy.props.PointerProperty(
-	name="script init", type=bpy.types.Text
-)
+bpy.types.Object.c3_onclick     = bpy.props.PointerProperty( name="on click script", type=bpy.types.Text)
+bpy.types.Object.c3_script_init = bpy.props.PointerProperty( name="init script", type=bpy.types.Text)
 
 for i in range(MAX_SCRIPTS_PER_OBJECT):
 	setattr(
@@ -1482,6 +1523,10 @@ if __name__=='__main__':
 			o = arg.split('=')[-1]
 		elif arg.startswith('--test='):
 			test = arg.split('=')[-1]
+		elif arg.startswith('--O'):
+			bpy.data.worlds[0].c3_export_opt = arg[2:]
+		elif arg.startswith('--output='):
+			bpy.data.worlds[0].c3_export_html = arg.split('=')[-1]
 
 	if '--test' in sys.argv or test:
 		import c3blendgen
