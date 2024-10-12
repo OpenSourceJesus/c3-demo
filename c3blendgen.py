@@ -38,7 +38,7 @@ def gen_test_scene(quant=None, wasm_simple_stroke_opt=None):
 		## only works with WASM export
 		ob.data.c3_grease_optimize=int(wasm_simple_stroke_opt)
 	if quant:
-		ob.c3_grease_quantize = quant
+		ob.data.c3_grease_quantize = quant
 
 	ob.location.x += 2
 	ob.scale.z += random()
@@ -85,7 +85,7 @@ def test2(quant=None, wasm_simple_stroke_opt=None):
 	if wasm_simple_stroke_opt:
 		ob.data.c3_grease_optimize=int(wasm_simple_stroke_opt)
 	if quant:
-		ob.c3_grease_quantize = quant
+		ob.data.c3_grease_quantize = quant
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
@@ -120,7 +120,7 @@ def test3(quant=None, wasm_simple_stroke_opt=None):
 	if wasm_simple_stroke_opt:
 		mob.data.c3_grease_optimize=int(wasm_simple_stroke_opt)
 	if quant:
-		mob.c3_grease_quantize = quant
+		mob.data.c3_grease_quantize = quant
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
@@ -164,4 +164,55 @@ def test3(quant=None, wasm_simple_stroke_opt=None):
 	ob.rotation_euler.x = math.pi/2
 	ob.location = [-0.6, 0.4, -3.5]
 	ob.parent = mob
+
+EXAMPLE4 = '''
+html_eval(`window.alert("hello js")`);
+'''
+
+def test4(quant=None, wasm_simple_stroke_opt=None):
+	cube = bpy.data.objects['Cube']
+	cube.hide_set(True)
+
+
+	bpy.ops.object.gpencil_add(type='MONKEY')
+	mob = bpy.context.active_object
+	txt = bpy.data.texts.new(name='example1.c3')
+	txt.from_string(EXAMPLE1)
+	mob.c3_script0 = txt
+
+	if wasm_simple_stroke_opt:
+		mob.data.c3_grease_optimize=int(wasm_simple_stroke_opt)
+	if quant:
+		mob.data.c3_grease_quantize = quant
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.data.body = '🗯️'
+	ob.data.size *= 2.2
+	ob.rotation_euler.x = math.pi/2
+	ob.location.x = 0.1
+	ob.location.z = 0.1
+	ob.parent = mob
+
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.data.body = 'hello C3'
+	ob.data.size *= 0.25
+	ob.location.x = 0.8
+	ob.location.z = 0.5
+	ob.rotation_euler.x = math.pi/2
+	ob.parent = mob
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.data.body = choice(['🎩', '🎓', '🧢', '👒'])
+	ob.data.size *= 1.5
+	ob.rotation_euler.x = math.pi/2
+	ob.location = [-0.8, -0.1, 0.7]
+	ob.parent = mob
+
+	txt = bpy.data.texts.new(name='example4.c3')
+	txt.from_string(EXAMPLE4)
+	ob.c3_onclick = txt
 
