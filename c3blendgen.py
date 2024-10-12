@@ -166,13 +166,13 @@ def test3(quant=None, wasm_simple_stroke_opt=None):
 	ob.parent = mob
 
 EXAMPLE4 = '''
-html_eval(`window.alert("hello js")`);
+document.getElementById('BUBBLE').hidden=false;
+document.getElementById('CHAT').hidden=false;
 '''
 
-def test4(quant=None, wasm_simple_stroke_opt=None):
+def test4(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	cube = bpy.data.objects['Cube']
 	cube.hide_set(True)
-
 
 	bpy.ops.object.gpencil_add(type='MONKEY')
 	mob = bpy.context.active_object
@@ -187,6 +187,8 @@ def test4(quant=None, wasm_simple_stroke_opt=None):
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
+	ob.name = 'BUBBLE'
+	ob.c3_hide = True
 	ob.data.body = '🗯️'
 	ob.data.size *= 2.2
 	ob.rotation_euler.x = math.pi/2
@@ -194,9 +196,10 @@ def test4(quant=None, wasm_simple_stroke_opt=None):
 	ob.location.z = 0.1
 	ob.parent = mob
 
-
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
+	ob.name = 'CHAT'
+	ob.c3_hide = True
 	ob.data.body = 'hello C3'
 	ob.data.size *= 0.25
 	ob.location.x = 0.8
@@ -213,6 +216,6 @@ def test4(quant=None, wasm_simple_stroke_opt=None):
 	ob.parent = mob
 
 	txt = bpy.data.texts.new(name='example4.c3')
-	txt.from_string(EXAMPLE4)
+	txt.from_string('html_eval(`%s`);' % example)
 	ob.c3_onclick = txt
 
