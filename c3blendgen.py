@@ -209,6 +209,7 @@ def test4(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
+	ob.name = 'HAT'
 	ob.data.body = choice(['🎩', '🎓', '🧢', '👒'])
 	ob.data.size *= 1.5
 	ob.rotation_euler.x = math.pi/2
@@ -218,4 +219,14 @@ def test4(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	txt = bpy.data.texts.new(name='example4.c3')
 	txt.from_string('html_eval(`%s`);' % example)
 	ob.c3_onclick = txt
+	return txt
 
+EXAMPLE5 = '''
+document.getElementById('$object0').hidden=false;
+document.getElementById('$object1').hidden=false;
+'''
+
+def test5(quant=None, wasm_simple_stroke_opt=None):
+	txt = test4(quant, wasm_simple_stroke_opt, example=EXAMPLE5)
+	txt.object0 = bpy.data.objects['BUBBLE']
+	txt.object1 = bpy.data.objects['CHAT']
