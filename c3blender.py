@@ -277,7 +277,8 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			txt = getattr(ob, "c3_script" + str(i))
 			if txt:
-				scripts.append(txt.as_string())
+				#scripts.append(txt.as_string())
+				scripts.append(macro_pointers(txt))
 
 
 		if ob.type=="MESH":
@@ -367,7 +368,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 				head += [
 					'fn void _onclick_%s(int _index_){' % tname,
 					'	Object self = objects[_index_];',
-					ob.c3_onclick.as_string(),
+					macro_pointers(ob.c3_onclick),
 					'}',
 				]
 				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
@@ -1487,6 +1488,15 @@ for i in range(MAX_OBJECTS_PER_TEXT):
 		bpy.props.PointerProperty(name="object%s" % i, type=bpy.types.Object),
 	)
 
+
+def macro_pointers(txt):
+	t = txt.as_string()
+	for i in range(MAX_OBJECTS_PER_TEXT):
+		tag = 'object%s' % i
+		ob = getattr(txt, tag)
+		if '$'+tag in t:
+			t = t.replace('$'+tag, ob.name)
+	return t
 
 @bpy.utils.register_class
 class C3ScriptsPanel(bpy.types.Panel):
