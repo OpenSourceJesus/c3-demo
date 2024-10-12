@@ -7,6 +7,7 @@ sys.path.append(_thisdir)
 EMSDK = os.path.join(_thisdir, "emsdk")
 BLENDER = 'blender'
 MAX_SCRIPTS_PER_OBJECT = 8
+MAX_OBJECTS_PER_TEXT = 4
 
 if not os.path.isdir('c3'):
 	if not os.path.isfile('c3-ubuntu-20.tar.gz'):
@@ -1479,12 +1480,35 @@ for i in range(MAX_SCRIPTS_PER_OBJECT):
 		"c3_script" + str(i),
 		bpy.props.PointerProperty(name="script%s" % i, type=bpy.types.Text),
 	)
-
+for i in range(MAX_OBJECTS_PER_TEXT):
+	setattr(
+		bpy.types.Text,
+		"object" + str(i),
+		bpy.props.PointerProperty(name="object%s" % i, type=bpy.types.Object),
+	)
 
 
 @bpy.utils.register_class
 class C3ScriptsPanel(bpy.types.Panel):
 	bl_idname = "OBJECT_PT_C3_Scripts_Panel"
+	bl_label = "C3 Script Pointers"
+	bl_space_type = "TEXT_EDITOR"
+	bl_region_type = "UI"
+	def draw(self, context):
+		txt = context.space_data.text
+		if txt:
+			self.layout.label(text=txt.name)
+		else:
+			self.layout.label(text="(no text)")
+			return
+
+		for i in range(MAX_OBJECTS_PER_TEXT):
+			self.layout.prop(txt, 'object%s' % i)
+
+
+@bpy.utils.register_class
+class C3ObjectPanel(bpy.types.Panel):
+	bl_idname = "OBJECT_PT_C3_Object_Panel"
 	bl_label = "C3 Object Options"
 	bl_space_type = "PROPERTIES"
 	bl_region_type = "WINDOW"
