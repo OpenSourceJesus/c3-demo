@@ -232,3 +232,20 @@ def test5(quant=None, wasm_simple_stroke_opt=None):
 	txt = test4(quant, wasm_simple_stroke_opt, example=EXAMPLE5)
 	txt.object0 = bpy.data.objects['BUBBLE']
 	txt.object1 = bpy.data.objects['CHAT']
+
+EXAMPLE6 = '''
+const [r,g,b,a] = [$color0];
+console.log(r,g,b,a);
+self.style.backgroundColor='red';
+'''
+
+def test6(quant=None, wasm_simple_stroke_opt=None):
+	txt = test4(quant, wasm_simple_stroke_opt, example=EXAMPLE5)
+	txt.object0 = bpy.data.objects['BUBBLE']
+	txt.object1 = bpy.data.objects['CHAT']
+
+	ob = bpy.data.objects['CHAT']
+	txt = bpy.data.texts.new(name='example6.c3')
+	txt.from_string('html_eval(`%s`);' % EXAMPLE6)
+	txt.color0 = [0,1,0]
+	ob.c3_onclick = txt
