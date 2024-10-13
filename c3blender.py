@@ -1487,6 +1487,11 @@ for i in range(MAX_OBJECTS_PER_TEXT):
 		"object" + str(i),
 		bpy.props.PointerProperty(name="object%s" % i, type=bpy.types.Object),
 	)
+	setattr(
+		bpy.types.Text,
+		"color" + str(i),
+		bpy.props.FloatVectorProperty(name="color%s" % i, subtype='COLOR'),
+	)
 
 
 def macro_pointers(txt):
@@ -1495,7 +1500,15 @@ def macro_pointers(txt):
 		tag = 'object%s' % i
 		ob = getattr(txt, tag)
 		if '$'+tag in t:
+			if not ob:
+				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
 			t = t.replace('$'+tag, ob.name)
+
+		tag = 'color%s' % i
+		clr = getattr(txt, tag)
+		if '$'+tag in t:
+			t = t.replace('$'+tag, ','.join([str(v) for v in clr]))
+
 	return t
 
 @bpy.utils.register_class
@@ -1512,8 +1525,13 @@ class C3ScriptsPanel(bpy.types.Panel):
 			self.layout.label(text="(no text)")
 			return
 
+		self.layout.label(text="object pointers")
 		for i in range(MAX_OBJECTS_PER_TEXT):
 			self.layout.prop(txt, 'object%s' % i)
+
+		self.layout.label(text="color pointers")
+		for i in range(MAX_OBJECTS_PER_TEXT):
+			self.layout.prop(txt, 'color%s' % i)
 
 
 @bpy.utils.register_class
