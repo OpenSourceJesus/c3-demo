@@ -1096,12 +1096,15 @@ c3dom_api = {
 
 	'html_bind_onclick':'''
 	html_bind_onclick(idx, f, oidx){
-		var func = this.wasm.instance.exports.__indirect_function_table.get(f)
-		this.elts[idx].onclick = function (){
-			func(oidx)
+		var elt = this.elts[idx]
+		elt._onclick_ = this.wasm.instance.exports.__indirect_function_table.get(f)
+		elt.onclick = function (){
+			self=elt
+			elt._onclick_(oidx)
 		}
 	}
 	''',
+
 
 	'html_eval':'''
 	html_eval(ptr){
