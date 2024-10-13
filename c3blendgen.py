@@ -234,9 +234,11 @@ def test5(quant=None, wasm_simple_stroke_opt=None):
 	txt.object1 = bpy.data.objects['CHAT']
 
 EXAMPLE6 = '''
-const [r,g,b,a] = [$color0];
-console.log(r,g,b,a);
-self.style.backgroundColor='red';
+const [r,g,b] = [$color0];
+console.log(r,g,b);
+console.log(this);
+console.log(self);
+self.style.backgroundColor='rgba('+(r*255)+','+(g*255)+','+(b*255)+',1.0)';
 '''
 
 def test6(quant=None, wasm_simple_stroke_opt=None):
@@ -244,7 +246,7 @@ def test6(quant=None, wasm_simple_stroke_opt=None):
 	txt.object0 = bpy.data.objects['BUBBLE']
 	txt.object1 = bpy.data.objects['CHAT']
 
-	ob = bpy.data.objects['CHAT']
+	ob = bpy.data.objects['BUBBLE']
 	txt = bpy.data.texts.new(name='example6.c3')
 	txt.from_string('html_eval(`%s`);' % EXAMPLE6)
 	txt.color0 = [0,1,0]
