@@ -173,8 +173,14 @@ HEADER_OBJECT_WASM = '''
 fn void Object.set_text(Object *obj, char *txt) {
 	html_set_text(obj.id, txt);
 }
+fn void Object.add_char(Object *obj, char c) {
+	html_add_char(obj.id, c);
+}
 fn void Object.css_scale(Object *obj, float scale) {
 	html_css_scale(obj.id, scale);
+}
+fn void Object.css_zindex(Object *obj, int z) {
+	html_set_zindex(obj.id, z);
 }
 
 '''
@@ -212,7 +218,7 @@ def is_maybe_circle(ob):
 def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
-def blender_to_c3(world, wasm=False, html=None, use_html=False):
+def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 	resx = world.c3_export_res_x
 	resy = world.c3_export_res_y
 	SCALE = world.c3_export_scale
@@ -228,7 +234,10 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 
 		head.append('extern fn int html_new (char *ptr) @extern("html_new");')
 		head.append('extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");')
+
 		head.append('extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");')
+		head.append('extern fn void html_add_char (int id, char c) @extern("html_add_char");')
+
 		head.append('extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");')
 		head.append('extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");')
 
@@ -239,6 +248,9 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 		head.append('extern fn void html_bind_onclick (int id, JSCallback ptr, int ob_index) @extern("html_bind_onclick");')
 
 		head.append('extern fn void html_eval (char *ptr) @extern("html_eval");')
+
+		head.append('extern fn char wasm_memory (int idx) @extern("wasm_memory");')
+		head.append('extern fn int wasm_size () @extern("wasm_size");')
 
 		head.append(WASM_HELPERS)
 
@@ -258,9 +270,11 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 	else:
 		draw.append('	raylib::begin_drawing();')
 		draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
+
 	meshes = []
 	tobjects = []
 	datas = {}
+
 	for ob in bpy.data.objects:
 		if ob.hide_get(): continue
 		print(ob)
@@ -279,6 +293,11 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 			if txt:
 				#scripts.append(txt.as_string())
 				scripts.append(macro_pointers(txt))
+
+			txt = getattr(ob, "c3_method" + str(i))
+			if txt and txt.name not in methods:
+				methods[txt.name] = macro_pointers(txt)
+				#raise RuntimeError(methods)
 
 
 		if ob.type=="MESH":
@@ -408,8 +427,27 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False):
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
 				]
 
+	if methods:
+		for tname in methods:
+			assert '(' in tname
+			assert tname.endswith(')')
+			fname, args = tname.split('(')
+			exdef = bpy.data.texts[tname].c3_extern
+			args_def = exdef.split('@')[0].split('(')[-1].split(')')[0]
 
+			if not exdef.endswith(';'): exdef += ';'
+			if not exdef.startswith('extern'):
+				exdef = 'extern ' + exdef
+			assert fname+'(' in exdef
+			exdef = exdef.replace(fname+'(', '%s(int _eltid,' % fname)
+			head.append(exdef)
+			args = args[:-1] ## strip )
+			head += [
 
+				'fn void Object.%s(Object *_obj, %s) {' % (fname, args_def),
+				'	%s(_obj.id, %s);' % (fname, args),
+				'}', 
+			]
 
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
@@ -952,7 +990,7 @@ $deco($0,1).then((js)=>{
 		var io={env:$.api_proxy()};
 		WebAssembly.instantiate(r,io).then((res)=>{
 			console.log(res.instance);
-			$.api_reset(res, "game");
+			$.api_reset(res, "game",r);
 		});
 	});
 });
@@ -1015,9 +1053,10 @@ class api{
 	api_proxy(){
 		return make_environment(this)
 	}
-	api_reset( wasm, id ){
+	api_reset(wasm,id,bytes){
 		this.elts=[]
 		this.wasm = wasm
+		this.bytes = new Uint8Array(bytes)
 		this.canvas = document.getElementById(id)
 		this.ctx = this.canvas.getContext("2d")
 		this.wasm.instance.exports.main()
@@ -1074,6 +1113,14 @@ c3dom_api = {
 	}
 	''',
 
+	'html_add_char':'''
+	html_add_char(idx, c){
+		var elt = this.elts[idx]
+		elt.append(String.fromCharCode(c))
+	}
+	''',
+
+
 	'html_css_scale':'''
 	html_css_scale(idx, sz){
 		this.elts[idx].style.transform='scale('+sz+')'
@@ -1096,10 +1143,12 @@ c3dom_api = {
 
 	'html_bind_onclick':'''
 	html_bind_onclick(idx, f, oidx){
+		console.log('bind-onclick:', f, oidx)
 		var elt = this.elts[idx]
 		elt._onclick_ = this.wasm.instance.exports.__indirect_function_table.get(f)
 		elt.onclick = function (){
 			self=elt
+			console.log('onclick:', self, arguments)
 			elt._onclick_(oidx)
 		}
 	}
@@ -1119,6 +1168,18 @@ c3dom_api = {
 		this.ctx.clearRect(0,0,this.ctx.canvas.width,this.ctx.canvas.height)
 	}
 	''',
+
+	'wasm_memory':'''
+	wasm_memory(idx){
+		return this.bytes[idx]
+	}
+	''',
+	'wasm_size':'''
+	wasm_size(){
+		return this.bytes.length
+	}
+	''',
+
 
 }
 
@@ -1247,7 +1308,7 @@ raylib_like_api = {
 }
 
 
-def gen_js_api(c3):
+def gen_js_api(c3, user_methods):
 	skip = []
 	if 'raylib::color_from_hsv' not in c3:
 		skip.append('ColorFromHSV')
@@ -1270,6 +1331,19 @@ def gen_js_api(c3):
 	for fname in c3dom_api:
 		if fname+'(' in c3:
 			js.append(c3dom_api[fname])
+
+	for fname in user_methods:
+		fudge = fname.replace('(', '(_,')
+		js += [
+			fudge + '{',
+				'self=this.elts[_]',
+				'this._%s;' % fname,
+			'}',
+
+			'_'+fname + '{',
+			user_methods[fname],
+			'}',
+		]
 
 	js.append('}')
 	js.append('new api()')
@@ -1321,7 +1395,7 @@ def compress_js(js):
 		o.append('var _$_=$r(`%s`,"%s".split(" "))' %(js, ' '.join(g) ))
 		return '\n'.join(o)
 
-def gen_html(wasm, c3, user_html=None, background='', test_precomp=False):
+def gen_html(wasm, c3, user_html=None, background='', test_precomp=False, user_methods={}):
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
 	print(cmd)
 	subprocess.check_call(cmd)
@@ -1330,7 +1404,7 @@ def gen_html(wasm, c3, user_html=None, background='', test_precomp=False):
 	b = base64.b64encode(w).decode('utf-8')
 
 	jtmp = '/tmp/c3api.js'
-	jslib = gen_js_api(c3)
+	jslib = gen_js_api(c3, user_methods)
 
 	if test_precomp:
 		## after gz this will be a few bytes bigger
@@ -1413,7 +1487,8 @@ def build_wasm( world ):
 	WORLD = world
 	if SERVER_PROC: SERVER_PROC.kill()
 	user_html = []
-	o = blender_to_c3(world, wasm=True, html=user_html)
+	user_methods = {}
+	o = blender_to_c3(world, wasm=True, html=user_html, methods=user_methods)
 	o = '\n'.join(o)
 	#print(o)
 	tmp = '/tmp/c3blender.c3'
@@ -1421,7 +1496,7 @@ def build_wasm( world ):
 	wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt)
 	#os.system('cp -v ./index.html /tmp/.')
 	#os.system('cp -v ./raylib.js /tmp/.')
-	html = gen_html(wasm, o, user_html)
+	html = gen_html(wasm, o, user_html, user_methods=user_methods)
 	open('/tmp/index.html', 'w').write(html)
 	if world.c3_export_html:
 		out = os.path.expanduser(world.c3_export_html)
@@ -1484,6 +1559,12 @@ for i in range(MAX_SCRIPTS_PER_OBJECT):
 		"c3_script" + str(i),
 		bpy.props.PointerProperty(name="script%s" % i, type=bpy.types.Text),
 	)
+	setattr(
+		bpy.types.Object,
+		"c3_method" + str(i),
+		bpy.props.PointerProperty(name="method%s" % i, type=bpy.types.Text),
+	)
+
 for i in range(MAX_OBJECTS_PER_TEXT):
 	setattr(
 		bpy.types.Text,
@@ -1495,6 +1576,8 @@ for i in range(MAX_OBJECTS_PER_TEXT):
 		"color" + str(i),
 		bpy.props.FloatVectorProperty(name="color%s" % i, subtype='COLOR'),
 	)
+
+bpy.types.Text.c3_extern = bpy.props.StringProperty(name="fn extern")
 
 
 def macro_pointers(txt):
@@ -1527,6 +1610,9 @@ class C3ScriptsPanel(bpy.types.Panel):
 		else:
 			self.layout.label(text="(no text)")
 			return
+
+		if txt.name.endswith(')'):
+			self.layout.prop(txt, 'c3_extern')
 
 		self.layout.label(text="object pointers")
 		for i in range(MAX_OBJECTS_PER_TEXT):
@@ -1564,6 +1650,16 @@ class C3ObjectPanel(bpy.types.Panel):
 			)
 			if hasProperty or not foundUnassignedScript:
 				self.layout.prop(ob, "c3_script" + str(i))
+			if not foundUnassignedScript:
+				foundUnassignedScript = not hasProperty
+
+		foundUnassignedScript = False
+		for i in range(MAX_SCRIPTS_PER_OBJECT):
+			hasProperty = (
+				getattr(ob, "c3_method" + str(i)) != None
+			)
+			if hasProperty or not foundUnassignedScript:
+				self.layout.prop(ob, "c3_method" + str(i))
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 
