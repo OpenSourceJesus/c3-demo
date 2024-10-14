@@ -200,6 +200,13 @@ MAIN_WASM = '''
 
 '''
 
+MAIN_WASM = '''
+	html_canvas_resize(%s, %s);
+	raylib_js_set_entry(&game_frame);
+
+'''
+
+
 MAIN = '''
 	raylib::init_window(%s, %s, "Hello, from C3");
 	raylib::set_target_fps(60);
@@ -233,6 +240,7 @@ extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");
 
 extern fn void html_set_zindex (int id, int z) @extern("html_set_zindex");
 extern fn void html_canvas_clear () @extern("html_canvas_clear");
+extern fn void html_canvas_resize (int x, int y) @extern("html_canvas_resize");
 
 def JSCallback = fn void( int );
 extern fn void html_bind_onclick (int id, JSCallback ptr, int ob_index) @extern("html_bind_onclick");
@@ -315,8 +323,43 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 
 			txt = getattr(ob, "c3_method" + str(i))
 			if txt and txt.name not in methods:
-				methods[txt.name] = macro_pointers(txt)
-				#raise RuntimeError(methods)
+				tname = txt.name
+
+				assert '(' in tname
+				assert tname.endswith(')')
+				fname, args = tname.split('(')
+				exdef = txt.c3_extern
+				if not exdef.startswith('extern') and not exdef.startswith('fn'):
+					exdef = 'fn ' + exdef
+				if not exdef.startswith('extern'):
+					exdef = 'extern ' + exdef
+				if not exdef.endswith(';'): exdef += ';'
+
+				args_def = exdef.split('@')[0].split('(')[-1].split(')')[0]
+
+				assert fname+'(' in exdef
+				exdef = exdef.replace(fname+'(', '%s(int _eltid,' % fname)
+
+				head.append(exdef)
+				args = args[:-1] ## strip )
+				head += [
+
+					'fn void Object.%s(Object *_obj, %s) {' % (fname, args_def),
+					'	%s(_obj.id, %s);' % (fname, args),
+					'}', 
+				]
+
+
+				if '@extern("' in txt.c3_extern:
+					tname = txt.c3_extern.split('@extern("')[-1].split('"')[0]
+					if len(tname) <= 1:
+						print(txt)
+						raise SyntaxError('@extern names must be at least two characters: %s' % txt.c3_extern)
+					tname += '(' + txt.name.split('(')[-1]
+
+				methods[tname] = macro_pointers(txt)
+
+
 
 
 		if ob.type=="MESH":
@@ -446,19 +489,23 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
 				]
 
-	if methods:
+	if methods and 0:
 		for tname in methods:
 			assert '(' in tname
 			assert tname.endswith(')')
 			fname, args = tname.split('(')
 			exdef = bpy.data.texts[tname].c3_extern
-			args_def = exdef.split('@')[0].split('(')[-1].split(')')[0]
-
-			if not exdef.endswith(';'): exdef += ';'
+			if not exdef.startswith('extern') and not exdef.startswith('fn'):
+				exdef = 'fn ' + exdef
 			if not exdef.startswith('extern'):
 				exdef = 'extern ' + exdef
+			if not exdef.endswith(';'): exdef += ';'
+
+			args_def = exdef.split('@')[0].split('(')[-1].split(')')[0]
+
 			assert fname+'(' in exdef
 			exdef = exdef.replace(fname+'(', '%s(int _eltid,' % fname)
+
 			head.append(exdef)
 			args = args[:-1] ## strip )
 			head += [
@@ -993,23 +1040,20 @@ def build_linux(world):
 
 JS_DECOMP = '''
 var $=null
-var $deco = async (u,t) => {
+var $dec=async(u,t)=>{
 	var d=new DecompressionStream('gzip')
 	var r=await fetch('data:application/octet-stream;base64,'+u)
 	var b=await r.blob()
 	var s=b.stream().pipeThrough(d)
 	var o=await new Response(s).blob()
-	if (t) return await o.text();
+	if(t) return await o.text();
 	else return await o.arrayBuffer();
 }
-$deco($0,1).then((js)=>{
-	console.log(js);
+$dec($0,1).then((js)=>{
 	$=eval(js);
-	$deco($1).then((r)=>{
-		var io={env:$.api_proxy()};
-		WebAssembly.instantiate(r,io).then((res)=>{
-			console.log(res.instance);
-			$.api_reset(res, "game",r);
+	$dec($1).then((r)=>{
+		WebAssembly.instantiate(r,{env:$.$proxy()}).then((res)=>{
+			$.$reset(res,"$",r)
 		});
 	});
 });
@@ -1029,33 +1073,33 @@ JS_LIB_API = '''
 function make_environment(e){
 	return new Proxy(e,{
 		get(t,p,r) {
-			if (e[p] !== undefined) {
+			if(e[p]!==undefined){
 				return e[p].bind(e)
 			}
-			return (...args) => {
+			return(...args)=>{
 				throw new Error(p)
 			}
 		}
 	});
 }
 
-function cstrlen(mem, ptr) {
-	let len = 0
-	while (mem[ptr] != 0) {
+function cstrlen(mem,ptr){
+	let len=0
+	while(mem[ptr]!=0){
 		len++
 		ptr++
 	}
 	return len
 }
 
-function cstr_by_ptr(mbuf, ptr) {
+function cstr_by_ptr(mbuf,ptr){
 	const mem= new Uint8Array(mbuf)
 	const len= cstrlen(mem,ptr)
 	const bytes= new Uint8Array(mbuf,ptr,len)
 	return new TextDecoder().decode(bytes)
 }
 
-function color_hex_unpacked(r, g, b, a) {
+function color_hex_unpacked(r,g,b,a){
 	r=r.toString(16).padStart(2,'0')
 	g=g.toString(16).padStart(2,'0')
 	b=b.toString(16).padStart(2,'0')
@@ -1063,33 +1107,31 @@ function color_hex_unpacked(r, g, b, a) {
 	return "#"+r+g+b+a
 }
 
-function getColorFromMemory(buf,ptr) {
-	const [r,g,b,a] = new Uint8Array(buf,ptr,4)
+function getColorFromMemory(buf,ptr){
+	const [r,g,b,a]=new Uint8Array(buf,ptr,4)
 	return color_hex_unpacked(r,g,b,a)
 }
 
 class api{
-	api_proxy(){
+	$proxy(){
 		return make_environment(this)
 	}
-	api_reset(wasm,id,bytes){
+	$reset(wasm,id,bytes){
 		this.elts=[]
-		this.wasm = wasm
-		this.bytes = new Uint8Array(bytes)
-		this.canvas = document.getElementById(id)
-		this.ctx = this.canvas.getContext("2d")
+		this.wasm=wasm
+		this.bytes=new Uint8Array(bytes)
+		this.canvas=document.getElementById(id)
+		this.ctx=this.canvas.getContext("2d")
 		this.wasm.instance.exports.main()
-		const next = (timestamp)=>{
-			if (this.quit) {
-				return;
-			}
-			this.dt = (timestamp - this.previous)/1000.0
-			this.previous = timestamp
+		const next=(timestamp)=>{
+			if(this.quit)return;
+			this.dt=(timestamp-this.previous)/1000.0
+			this.previous=timestamp
 			this.entryFunction()
 			window.requestAnimationFrame(next)
 		};
 		window.requestAnimationFrame((timestamp)=>{
-			this.previous = timestamp
+			this.previous=timestamp
 			window.requestAnimationFrame(next)
 		});
 	}
@@ -1099,7 +1141,7 @@ class api{
 c3dom_api = {
 	'html_new' : '''
 	html_new(ptr){
-		var elt=document.createElement(cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr))
+		var elt=document.createElement(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr))
 		elt.style.position='absolute'
 		this.elts.push(elt)
 		document.body.appendChild(elt)
@@ -1108,7 +1150,7 @@ c3dom_api = {
 	''',
 
 	'html_new_text' : '''
-	html_new_text(ptr, x,y, sz, viz, id){
+	html_new_text(ptr,x,y,sz,viz,id){
 		var elt=document.createElement('pre')
 		elt.style.transformOrigin='left'
 		elt.style.position='absolute'
@@ -1116,18 +1158,18 @@ c3dom_api = {
 		elt.style.top=y
 		elt.style.fontSize=sz
 		elt.hidden=viz
-		elt.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer, id)
+		elt.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,id)
 		this.elts.push(elt)
 		document.body.appendChild(elt)
-		elt.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr))
+		elt.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr))
 		return this.elts.length-1
 	}
 	''',
 
 	'html_set_text':'''
-	html_set_text(idx, ptr){
-		var elt = this.elts[idx]
-		var txt = cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr)
+	html_set_text(idx,ptr){
+		var elt=this.elts[idx]
+		var txt=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
 		elt.firstChild.nodeValue=txt
 	}
 	''',
@@ -1147,7 +1189,7 @@ c3dom_api = {
 	''',
 
 	'html_set_position':'''
-	html_set_position(idx, x, y){
+	html_set_position(idx,x,y){
 		var elt = this.elts[idx]
 		elt.style.left = x
 		elt.style.top = y
@@ -1155,19 +1197,17 @@ c3dom_api = {
 	''',
 
 	'html_set_zindex':'''
-	html_set_zindex(idx, z){
+	html_set_zindex(idx,z){
 		this.elts[idx].style.zIndex = z
 	}
 	''',
 
 	'html_bind_onclick':'''
-	html_bind_onclick(idx, f, oidx){
-		console.log('bind-onclick:', f, oidx)
-		var elt = this.elts[idx]
-		elt._onclick_ = this.wasm.instance.exports.__indirect_function_table.get(f)
-		elt.onclick = function (){
+	html_bind_onclick(idx,f,oidx){
+		var elt=this.elts[idx]
+		elt._onclick_=this.wasm.instance.exports.__indirect_function_table.get(f)
+		elt.onclick=function(){
 			self=elt
-			console.log('onclick:', self, arguments)
 			elt._onclick_(oidx)
 		}
 	}
@@ -1176,7 +1216,7 @@ c3dom_api = {
 
 	'html_eval':'''
 	html_eval(ptr){
-		var _ = cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr)
+		var _=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
 		eval(_)
 	}
 	''',
@@ -1187,6 +1227,14 @@ c3dom_api = {
 		this.ctx.clearRect(0,0,this.ctx.canvas.width,this.ctx.canvas.height)
 	}
 	''',
+
+	'html_canvas_resize' : '''
+	html_canvas_resize(w,h){
+		this.ctx.canvas.width=w
+		this.ctx.canvas.height=h
+	}
+	''',
+
 
 	'wasm_memory':'''
 	wasm_memory(idx){
@@ -1498,11 +1546,11 @@ def gen_html(world, wasm, c3, user_html=None, background='', test_precomp=False,
 	o = [
 		'<html>',
 		'<body %s>' % background,
-		'<canvas id="game"></canvas>',
+		'<canvas id="$"></canvas>',
 		'<script>', 
 		'var $0="%s"' % jsb,
 		'var $1="%s"' % b,
-		JS_DECOMP, 
+		JS_DECOMP.replace('\t',''), 
 		'</script>',
 	]
 	if user_html:
