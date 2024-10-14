@@ -38,7 +38,7 @@ if not EMCC and "--install-wasm" in sys.argv:
 	emsdk_update()
 
 
-def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True):
+def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True, raylib='./raylib.c3'):
 	cmd = [C3]
 	if wasm:
 		cmd += ['--target', 'wasm32']
@@ -67,7 +67,7 @@ def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True):
 		else:
 			cmd.append('-Oz')
 
-	cmd += [mode, input, './raylib.c3']
+	cmd += [mode, input, raylib]
 	print(cmd)
 	res = subprocess.check_output(cmd).decode('utf-8')
 	ofiles = []
@@ -118,7 +118,7 @@ if not bpy:
 HEADER = '''
 import raylib;
 def Entry = fn void();
-extern fn void raylib_js_set_entry(Entry entry) @wasm;
+extern fn void raylib_js_set_entry(Entry entry) @extern("_") @wasm;
 const Vector2 GRAVITY = {0, 1000};
 const int N = 10;
 const float COLLISION_DAMP = 1;
@@ -218,6 +218,33 @@ def is_maybe_circle(ob):
 def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
+WASM_EXTERN = '''
+extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
+extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, float r, float g, float b, float a) @extern("DrawSplineLinearWASM");
+
+extern fn int html_new (char *ptr) @extern("html_new");
+extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
+
+extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
+extern fn void html_add_char (int id, char c) @extern("html_add_char");
+
+extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");
+extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");
+
+extern fn void html_set_zindex (int id, int z) @extern("html_set_zindex");
+extern fn void html_canvas_clear () @extern("html_canvas_clear");
+
+def JSCallback = fn void( int );
+extern fn void html_bind_onclick (int id, JSCallback ptr, int ob_index) @extern("html_bind_onclick");
+
+extern fn void html_eval (char *ptr) @extern("html_eval");
+
+extern fn char wasm_memory (int idx) @extern("wasm_memory");
+extern fn int wasm_size () @extern("wasm_size");
+
+'''
+
+
 def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 	resx = world.c3_export_res_x
 	resy = world.c3_export_res_y
@@ -229,28 +256,20 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 	head  = [HEADER, HEADER_OBJECT]
 	if wasm:
 		head.append(HEADER_OBJECT_WASM)
-		head.append('extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");')
-		head.append('extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, float r, float g, float b, float a) @extern("DrawSplineLinearWASM");')
+		if world.c3_miniapi:
+			s = WASM_EXTERN
+			for fname in c3dom_api_mini:
+				key = '@extern("%s")' % fname
+				assert key in s
+				s = s.replace(key, '@extern("%s")' % c3dom_api_mini[fname]['sym'])
 
-		head.append('extern fn int html_new (char *ptr) @extern("html_new");')
-		head.append('extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");')
+			for fname in raylib_like_api_mini:
+				key = '@extern("%s")' % fname
+				s = s.replace(key, '@extern("%s")' % raylib_like_api_mini[fname]['sym'])
 
-		head.append('extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");')
-		head.append('extern fn void html_add_char (int id, char c) @extern("html_add_char");')
-
-		head.append('extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");')
-		head.append('extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");')
-
-		head.append('extern fn void html_set_zindex (int id, int z) @extern("html_set_zindex");')
-		head.append('extern fn void html_canvas_clear () @extern("html_canvas_clear");')
-
-		head.append('def JSCallback = fn void( int );')
-		head.append('extern fn void html_bind_onclick (int id, JSCallback ptr, int ob_index) @extern("html_bind_onclick");')
-
-		head.append('extern fn void html_eval (char *ptr) @extern("html_eval");')
-
-		head.append('extern fn char wasm_memory (int idx) @extern("wasm_memory");')
-		head.append('extern fn int wasm_size () @extern("wasm_size");')
+			head.append( s )
+		else:
+			head.append(WASM_EXTERN)
 
 		head.append(WASM_HELPERS)
 
@@ -258,7 +277,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
-		'fn void game_frame() @wasm {',
+		'fn void game_frame() @extern("$") @wasm {',
 		'	Object self;',
 		'	Object parent;',
 		#'	int __self__;',
@@ -1078,7 +1097,7 @@ class api{
 
 
 c3dom_api = {
-	'html_new_div' : '''
+	'html_new' : '''
 	html_new(ptr){
 		var elt=document.createElement(cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr))
 		elt.style.position='absolute'
@@ -1184,6 +1203,12 @@ c3dom_api = {
 }
 
 raylib_like_api = {
+	'raylib_js_set_entry':'''
+	_(f) {
+		this.entryFunction = this.wasm.instance.exports.__indirect_function_table.get(f)
+	}
+	''',
+
 	'InitWindow' : '''
 	InitWindow(w,h,ptr){
 		this.ctx.canvas.width=w
@@ -1260,13 +1285,8 @@ raylib_like_api = {
 	}
 	''',
 
-	'raylib_js_set_entry':'''
-	raylib_js_set_entry(f) {
-		this.entryFunction = this.wasm.instance.exports.__indirect_function_table.get(f)
-	}
-	''',
 
-	'':'''
+	'GetRandomValue':'''
 	GetRandomValue(min,max) {
 		return min+Math.floor(Math.random()*(max-min+1))
 	}
@@ -1307,8 +1327,39 @@ raylib_like_api = {
 
 }
 
+raylib_like_api_mini = {}
+c3dom_api_mini = {}
+def gen_mini_api():
+	import string
+	syms = list(string.ascii_letters)
+	for fname in raylib_like_api:
+		#if fname=='raylib_js_set_entry':  ## hardcoded to `_`
+		#	continue
+		print(fname)
+		code = raylib_like_api[fname].strip()
+		print(code)
+		if code.startswith(fname):
+			sym = syms.pop()
+			code = sym + code[len(fname):]
+			raylib_like_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
+		else:
+			sym = code.split('(')[0]
+			raylib_like_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
 
-def gen_js_api(c3, user_methods):
+
+	for fname in c3dom_api:
+		print(fname)
+		code = c3dom_api[fname].strip()
+		print(code)
+		assert code.startswith(fname)
+		sym = syms.pop()
+		code = sym + code[len(fname):]
+		c3dom_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
+
+gen_mini_api()
+
+
+def gen_js_api(world, c3, user_methods):
 	skip = []
 	if 'raylib::color_from_hsv' not in c3:
 		skip.append('ColorFromHSV')
@@ -1326,11 +1377,20 @@ def gen_js_api(c3, user_methods):
 		if fname in skip:
 			print('skipping:', fname)
 			continue
-		js.append(raylib_like_api[fname])
+
+		if world.c3_miniapi:
+			if fname in raylib_like_api_mini:
+				js.append(raylib_like_api_mini[fname]['code'])
+		else:
+			js.append(raylib_like_api[fname])
 
 	for fname in c3dom_api:
 		if fname+'(' in c3:
-			js.append(c3dom_api[fname])
+
+			if world.c3_miniapi:
+				js.append(c3dom_api_mini[fname]['code'])
+			else:
+				js.append(c3dom_api[fname])
 
 	for fname in user_methods:
 		fudge = fname.replace('(', '(_,')
@@ -1395,7 +1455,7 @@ def compress_js(js):
 		o.append('var _$_=$r(`%s`,"%s".split(" "))' %(js, ' '.join(g) ))
 		return '\n'.join(o)
 
-def gen_html(wasm, c3, user_html=None, background='', test_precomp=False, user_methods={}):
+def gen_html(world, wasm, c3, user_html=None, background='', test_precomp=False, user_methods={}):
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
 	print(cmd)
 	subprocess.check_call(cmd)
@@ -1404,7 +1464,7 @@ def gen_html(wasm, c3, user_html=None, background='', test_precomp=False, user_m
 	b = base64.b64encode(w).decode('utf-8')
 
 	jtmp = '/tmp/c3api.js'
-	jslib = gen_js_api(c3, user_methods)
+	jslib = gen_js_api(world, c3, user_methods)
 
 	if test_precomp:
 		## after gz this will be a few bytes bigger
@@ -1493,10 +1553,19 @@ def build_wasm( world ):
 	#print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
-	wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt)
+	if world.c3_miniapi:
+		rtmp = '/tmp/miniraylib.c3'
+		raylib = open('./raylib.c3').read()
+		for fname in raylib_like_api_mini:
+			b = raylib_like_api_mini[fname]['sym']
+			raylib = raylib.replace('@extern("%s")' %fname, '@extern("%s")' % b)
+		open(rtmp,'w').write(raylib)
+		wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt, raylib=rtmp)
+	else:
+		wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt)
 	#os.system('cp -v ./index.html /tmp/.')
 	#os.system('cp -v ./raylib.js /tmp/.')
-	html = gen_html(wasm, o, user_html, user_methods=user_methods)
+	html = gen_html(world, wasm, o, user_html, user_methods=user_methods)
 	open('/tmp/index.html', 'w').write(html)
 	if world.c3_export_html:
 		out = os.path.expanduser(world.c3_export_html)
@@ -1520,6 +1589,7 @@ bpy.types.World.c3_export_offset_x = bpy.props.IntProperty(name="offset X", defa
 bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name="offset Y", default=100)
 
 bpy.types.World.c3_export_html = bpy.props.StringProperty(name="c3 export path (.html)")
+bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name="c3 minifiy js/wasm api calls")
 
 bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
 	name='optimize',
@@ -1694,6 +1764,8 @@ if __name__=='__main__':
 			bpy.data.worlds[0].c3_export_opt = arg[2:]
 		elif arg.startswith('--output='):
 			bpy.data.worlds[0].c3_export_html = arg.split('=')[-1]
+		elif arg=='--minifiy':
+			bpy.data.worlds[0].c3_miniapi = True
 
 	if '--test' in sys.argv or test:
 		import c3blendgen
