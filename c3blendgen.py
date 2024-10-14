@@ -338,6 +338,6 @@ def test8(quant=None, wasm_simple_stroke_opt=None):
 			else self.append('🟫');
 		}
 	''' % wasm2art)
-	txt.c3_extern = 'fn void wasm2art(int c) @wasm("wasm2art")'
+	txt.c3_extern = 'fn void wasm2art(int c) @extern("wa") @wasm'
 	ob.c3_method0 = txt
 
