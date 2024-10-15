@@ -1,11 +1,17 @@
 #!/usr/bin/python3
-import os, sys, subprocess, atexit, webbrowser, math, base64
+import os, sys, subprocess, atexit, webbrowser, math, base64, string
 from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
 sys.path.append(_thisdir)
 
-EMSDK = os.path.join(_thisdir, "emsdk")
 BLENDER = 'blender'
+if sys.platform == 'win32': # Windows
+	BLENDER = 'C:/Program Files/Blender Foundation/Blender 4.2/blender.exe'
+elif sys.platform == 'darwin': # Apple
+	BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender'
+
+
+EMSDK = os.path.join(_thisdir, "emsdk")
 MAX_SCRIPTS_PER_OBJECT = 8
 MAX_OBJECTS_PER_TEXT = 4
 
@@ -34,6 +40,7 @@ if "--install-wasm" in sys.argv and not os.path.isdir(EMSDK):
 	emsdk_update()
 
 EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc")
+WASM_OBJDUMP = os.path.join(EMSDK, "upstream/bin/llvm-objdump")
 if not EMCC and "--install-wasm" in sys.argv:
 	emsdk_update()
 
@@ -92,8 +99,18 @@ except:
 if __name__=='__main__':
 	if bpy:
 		pass
-	elif '--blender' in sys.argv or os.path.isfile('/usr/bin/blender'):
-		cmd = [BLENDER, '--python', __file__]
+	elif '--c3demo' in sys.argv:
+		## runs simple test without blender
+		build()
+		sys.exit()
+
+	else:
+		cmd = [BLENDER]
+		for arg in sys.argv:
+			if arg.endswith('.blend'):
+				cmd.append(arg)
+				break
+		cmd +=['--python', __file__]
 		exargs = []
 		for arg in sys.argv:
 			if arg.startswith('--'):
@@ -104,8 +121,6 @@ if __name__=='__main__':
 		print(cmd)
 		subprocess.check_call(cmd)
 		sys.exit()
-	else:
-		build()
 
 ## blender ##
 if not bpy:
@@ -290,6 +305,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 
 	meshes = []
 	datas = {}
+	ascii_letters = list(string.ascii_uppercase)
 
 	for ob in bpy.data.objects:
 		if ob.hide_get(): continue
@@ -416,12 +432,20 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			]
 			if ob.c3_onclick:
 				tname = safename(ob.c3_onclick)
-				head += [
-					'fn void _onclick_%s(int _index_){' % tname,
-					'	Object self = objects[_index_];',
-					macro_pointers(ob.c3_onclick),
-					'}',
-				]
+				if wasm and ascii_letters:
+					head += [
+						'fn void _onclick_%s(int _index_) @extern("%s") {' % (tname,ascii_letters.pop()),
+						'	Object self = objects[_index_];',
+						macro_pointers(ob.c3_onclick),
+						'}',
+					]
+				else:
+					head += [
+						'fn void _onclick_%s(int _index_){' % tname,
+						'	Object self = objects[_index_];',
+						macro_pointers(ob.c3_onclick),
+						'}',
+					]
 				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
 			if ob.location.y >= 0.1:
 				setup.append('	html_set_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y*10)))
@@ -943,7 +967,6 @@ class C3WorldPanel(bpy.types.Panel):
 		self.layout.prop(context.world, 'c3_export_offset_y')
 		self.layout.prop(context.world, 'c3_export_opt')
 		self.layout.prop(context.world, 'c3_export_html')
-		self.layout.prop(context.world, 'c3_miniapi')
 
 		self.layout.operator("c3.export_wasm", icon="CONSOLE")
 		if _BUILD_INFO['wasm-size']:
@@ -954,6 +977,20 @@ class C3WorldPanel(bpy.types.Panel):
 		self.layout.operator("c3.export", icon="CONSOLE")
 		if _BUILD_INFO['native-size']:
 			self.layout.label(text="exe KB=%s" %( _BUILD_INFO['native-size']//1024 ))
+
+@bpy.utils.register_class
+class JS13KB_Panel(bpy.types.Panel):
+	bl_idname = "WORLD_PT_JS13KB_Panel"
+	bl_label = "js13kgames.com"
+	bl_space_type = "PROPERTIES"
+	bl_region_type = "WINDOW"
+	bl_context = "world"
+
+	def draw(self, context):
+		self.layout.prop(context.world, 'c3_miniapi')
+		self.layout.prop(context.world, 'c3_js13kb')
+
+
 
 def build_linux(world):
 	global WORLD
@@ -1306,14 +1343,9 @@ raylib_like_api = {
 raylib_like_api_mini = {}
 c3dom_api_mini = {}
 def gen_mini_api():
-	import string
-	syms = list(string.ascii_letters)
+	syms = list(string.ascii_lowercase)
 	for fname in raylib_like_api:
-		#if fname=='raylib_js_set_entry':  ## hardcoded to `_`
-		#	continue
-		print(fname)
 		code = raylib_like_api[fname].strip()
-		print(code)
 		if code.startswith(fname):
 			sym = syms.pop()
 			code = sym + code[len(fname):]
@@ -1324,9 +1356,7 @@ def gen_mini_api():
 
 
 	for fname in c3dom_api:
-		print(fname)
 		code = c3dom_api[fname].strip()
-		print(code)
 		assert code.startswith(fname)
 		sym = syms.pop()
 		code = sym + code[len(fname):]
@@ -1345,6 +1375,8 @@ def gen_js_api(world, c3, user_methods):
 		skip.append('DrawRectangleV')
 	if 'raylib::clear_background' not in c3:
 		skip.append('ClearBackground')
+	if 'DrawSplineLinearWASM' not in c3:
+		skip.append('DrawSplineLinearWASM')
 
 	js = [
 		JS_LIB_API,
@@ -1542,7 +1574,16 @@ def build_wasm( world ):
 	#os.system('cp -v ./index.html /tmp/.')
 	#os.system('cp -v ./raylib.js /tmp/.')
 	html = gen_html(world, wasm, o, user_html, user_methods=user_methods)
+	if world.c3_js13kb:
+		if len(html.encode('utf-8')) > 1024*13:
+			raise SyntaxError('final html is over 13KB')
 	open('/tmp/index.html', 'w').write(html)
+
+	if WASM_OBJDUMP:
+		cmd = [WASM_OBJDUMP, '--syms', wasm]
+		print(cmd)
+		subprocess.check_call(cmd)
+
 	if world.c3_export_html:
 		out = os.path.expanduser(world.c3_export_html)
 		print('saving:', out)
@@ -1566,6 +1607,7 @@ bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name="offset Y", defa
 
 bpy.types.World.c3_export_html = bpy.props.StringProperty(name="c3 export path (.html)")
 bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name="c3 minifiy js/wasm api calls")
+bpy.types.World.c3_js13kb = bpy.props.BoolProperty(name="error on export if output is over 13KB")
 
 bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
 	name='optimize',
@@ -1742,6 +1784,8 @@ if __name__=='__main__':
 			bpy.data.worlds[0].c3_export_html = arg.split('=')[-1]
 		elif arg=='--minifiy':
 			bpy.data.worlds[0].c3_miniapi = True
+		elif arg=='--js13k':
+			bpy.data.worlds[0].c3_js13kb = True
 
 	if '--test' in sys.argv or test:
 		import c3blendgen
