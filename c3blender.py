@@ -195,12 +195,6 @@ fn void transform_spline_wasm (Vector2 *source, Vector2 *target, int len, Vector
 '''
 
 MAIN_WASM = '''
-	raylib::init_window(%s, %s, "Hello, from C3 WebAssembly");
-	raylib_js_set_entry(&game_frame);
-
-'''
-
-MAIN_WASM = '''
 	html_canvas_resize(%s, %s);
 	raylib_js_set_entry(&game_frame);
 
@@ -281,25 +275,20 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 
 		head.append(WASM_HELPERS)
 
-
-
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
 		'fn void game_frame() @extern("$") @wasm {',
 		'	Object self;',
 		'	Object parent;',
-		#'	int __self__;',
 		'	float dt = raylib::get_frame_time();',
 	]
 	if wasm:
-		#draw.append('	raylib::clear_background({0x00, 0x00, 0x00, 0x00});')  ## this fails?
 		draw.append('	html_canvas_clear();')
 	else:
 		draw.append('	raylib::begin_drawing();')
 		draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
 
 	meshes = []
-	tobjects = []
 	datas = {}
 
 	for ob in bpy.data.objects:
@@ -318,7 +307,6 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			txt = getattr(ob, "c3_script" + str(i))
 			if txt:
-				#scripts.append(txt.as_string())
 				scripts.append(macro_pointers(txt))
 
 			txt = getattr(ob, "c3_method" + str(i))
@@ -363,7 +351,6 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 
 
 		if ob.type=="MESH":
-			#ob['c3_index'] = idx
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
@@ -395,7 +382,6 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			else:
 				draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
 		elif ob.type=='GPENCIL':
-			#ob['c3_index'] = idx
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			sx,sy,sz = ob.scale
@@ -407,10 +393,6 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				grease_to_c3_raylib(ob, datas, head, draw, setup)
 
 		elif ob.type=='FONT' and wasm:
-			#idx = len(tobjects)
-			#tobjects.append(ob)
-
-
 			cscale = ob.data.size*SCALE
 			if use_html:
 				css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %(x+(cscale*0.1),z-cscale, cscale)
@@ -419,7 +401,6 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				continue
 
 			meshes.append(ob)
-			#setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			hide = 'false'
 			if ob.c3_hide:
 				setup.append('	objects[%s].hide=true;' % idx)
@@ -430,19 +411,8 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				z = -z
 
 			setup += [
-				#'int _elt = html_new("div");',
-				#'html_set_text(_elt, "%s");' %ob.data.body,
-				#'html_set_position(_elt, %s,%s);' %(x+(cscale*0.1),z-cscale),
-				#'text_objects[%s] = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-cscale, cscale)
-
-				#'	objects[%s].position={%s,%s};' % (idx, x,z),
 				'	objects[%s].position={%s,%s};' % (idx, x+(cscale*0.1),z-(cscale*1.8)),
-
-
-				#'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x+(cscale*0.1),z-cscale, cscale)
-				#'	objects[%s].id = html_new_text("%s", %s,%s, %s);' % (idx, ob.data.body, x,z, cscale)
 				'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale, hide, ob.name),
-
 			]
 			if ob.c3_onclick:
 				tname = safename(ob.c3_onclick)
@@ -458,7 +428,6 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			elif ob.location.y <= -0.1:
 				setup.append('	html_set_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
 
-			#draw.append('	__self__ = text_objects[%s];' % idx)
 			draw.append('	self = objects[%s];' % idx)
 
 			if scripts:
@@ -473,47 +442,15 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 					for prop in props:
 						if 'self.'+prop in s:
 							s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
-					#if 'self.set_text(' in s:
-					#	s = s.replace('self.set_text(', 'html_set_text(__self__,')
 					draw.append('\t' + s)
 
 			if ob.parent:
-				print(ob, ob.parent)
 				draw += [
-
-					#'parent = objects[%s];' % ob.parent['c3_index'],
 					'parent = objects[%s_id];' % safename(ob.parent),
-
 					#'self.position.x=parent.position.x;',
 					#'self.position.y=parent.position.y;',
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
 				]
-
-	if methods and 0:
-		for tname in methods:
-			assert '(' in tname
-			assert tname.endswith(')')
-			fname, args = tname.split('(')
-			exdef = bpy.data.texts[tname].c3_extern
-			if not exdef.startswith('extern') and not exdef.startswith('fn'):
-				exdef = 'fn ' + exdef
-			if not exdef.startswith('extern'):
-				exdef = 'extern ' + exdef
-			if not exdef.endswith(';'): exdef += ';'
-
-			args_def = exdef.split('@')[0].split('(')[-1].split(')')[0]
-
-			assert fname+'(' in exdef
-			exdef = exdef.replace(fname+'(', '%s(int _eltid,' % fname)
-
-			head.append(exdef)
-			args = args[:-1] ## strip )
-			head += [
-
-				'fn void Object.%s(Object *_obj, %s) {' % (fname, args_def),
-				'	%s(_obj.id, %s);' % (fname, args),
-				'}', 
-			]
 
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
@@ -526,8 +463,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 	draw.append('}')
 
 	head.append('Object[%s] objects;' % len(meshes))
-	if tobjects:
-		head.append('int[%s] text_objects;' % len(tobjects))
+
 	if unpackers:
 		for gkey in unpackers:
 			head += unpackers[gkey]
@@ -622,11 +558,6 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 				r,g,b,a = mat.grease_pencil.fill_color
 				swidth = calc_stroke_width(stroke)
 				datas[dname]['draw'].append({'layer':lidx, 'index':sidx, 'length':nn, 'width':swidth, 'fill':use_fill, 'color':[r,g,b,a]})
-
-				#if gquant in ('6bits', '7bits'):
-				#	draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n*3, swidth, use_fill, r,g,b,a))
-				#else:
-				#	draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, lidx, sidx, n, swidth, use_fill, r,g,b,a))
 
 		head += data
 		if gquant:
@@ -896,10 +827,6 @@ def quantizer(points, quant, trim=True):
 				print('WARN: 6bit vertex clip z=', dz)
 				dz = -32
 
-
-		#s.append('{%s,%s}' % ( int(x1*q), int(-z1*q) ))
-		#s.append('{%s,%s}' % ( int(dx*q), int(dz*q) ))
-
 		if quant in ('6bits', '7bits'):
 			if mvec:
 				mdx, mdz = mvec[0]
@@ -1016,6 +943,7 @@ class C3WorldPanel(bpy.types.Panel):
 		self.layout.prop(context.world, 'c3_export_offset_y')
 		self.layout.prop(context.world, 'c3_export_opt')
 		self.layout.prop(context.world, 'c3_export_html')
+		self.layout.prop(context.world, 'c3_miniapi')
 
 		self.layout.operator("c3.export_wasm", icon="CONSOLE")
 		if _BUILD_INFO['wasm-size']:
