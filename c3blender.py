@@ -1651,10 +1651,14 @@ def macro_pointers(txt):
 	for i in range(MAX_OBJECTS_PER_TEXT):
 		tag = 'object%s' % i
 		ob = getattr(txt, tag)
-		if '$'+tag in t:
+		if '$'+tag+'.' in t:
 			if not ob:
 				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
-			t = t.replace('$'+tag, ob.name)
+			t = t.replace('$'+tag+'.', 'objects[%s_id].' % safename(ob))
+		elif '$'+tag in t:
+			if not ob:
+				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
+			t = t.replace('$'+tag, ob.name)  ## only works inside of quotes in html dom
 
 		tag = 'color%s' % i
 		clr = getattr(txt, tag)
