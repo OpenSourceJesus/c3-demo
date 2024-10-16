@@ -9,6 +9,7 @@ demo.wasm: demo.c3
 demo.wat: demo.wasm
 	wasm2wat demo.wasm > demo.wat
 
+
 install-blender:
 	sudo snap install blender
 install-blender-fedora:
@@ -23,3 +24,6 @@ blender-wasm-8bit:
 	python3 ./c3blender.py --test --wasm --8bits
 blender-wasm-8bit-opt:
 	python3 ./c3blender.py --test --wasm --8bits --stroke-opt=4
+
+js13k:
+	python3 c3blender.py --test=test9 --wasm --Oz --js13k --stroke-opt=4 --7bits
