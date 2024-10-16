@@ -1039,36 +1039,7 @@ $dec($0,1).then((js)=>{
 });
 '''
 
-JS_LIB_API = '''
-function make_environment(e){
-	return new Proxy(e,{
-		get(t,p,r) {
-			if(e[p]!==undefined){
-				return e[p].bind(e)
-			}
-			return(...args)=>{
-				throw new Error(p)
-			}
-		}
-	});
-}
-
-function cstrlen(mem,ptr){
-	let len=0
-	while(mem[ptr]!=0){
-		len++
-		ptr++
-	}
-	return len
-}
-
-function cstr_by_ptr(mbuf,ptr){
-	const mem= new Uint8Array(mbuf)
-	const len= cstrlen(mem,ptr)
-	const bytes= new Uint8Array(mbuf,ptr,len)
-	return new TextDecoder().decode(bytes)
-}
-
+JS_LIB_COLOR_HELPERS = '''
 function color_hex_unpacked(r,g,b,a){
 	r=r.toString(16).padStart(2,'0')
 	g=g.toString(16).padStart(2,'0')
@@ -1076,10 +1047,32 @@ function color_hex_unpacked(r,g,b,a){
 	a=a.toString(16).padStart(2,'0')
 	return "#"+r+g+b+a
 }
-
 function getColorFromMemory(buf,ptr){
 	const [r,g,b,a]=new Uint8Array(buf,ptr,4)
 	return color_hex_unpacked(r,g,b,a)
+}
+'''
+
+JS_LIB_API = '''
+function make_environment(e){
+	return new Proxy(e,{
+		get(t,p,r) {
+			if(e[p]!==undefined){return e[p].bind(e)}
+			return(...args)=>{throw p}
+		}
+	});
+}
+
+function cstrlen(m,p){
+	var l=0
+	while(m[p]!=0){l++;p++}
+	return l
+}
+
+function cstr_by_ptr(m,p){
+	const l=cstrlen(new Uint8Array(m),p)
+	const b=new Uint8Array(m,p,l)
+	return new TextDecoder().decode(b)
 }
 
 class api{
@@ -1138,16 +1131,13 @@ c3dom_api = {
 
 	'html_set_text':'''
 	html_set_text(idx,ptr){
-		var elt=this.elts[idx]
-		var txt=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
-		elt.firstChild.nodeValue=txt
+		this.elts[idx].firstChild.nodeValue=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
 	}
 	''',
 
 	'html_add_char':'''
 	html_add_char(idx, c){
-		var elt = this.elts[idx]
-		elt.append(String.fromCharCode(c))
+		this.elts[idx].append(String.fromCharCode(c))
 	}
 	''',
 
@@ -1262,7 +1252,7 @@ raylib_like_api = {
 
 	'GetFrameTime':'''
 	GetFrameTime(){
-		return Math.min(this.dt, 1.0/60)
+		return Math.min(this.dt,1.0/60)
 	}
 	''',
 
@@ -1278,17 +1268,17 @@ raylib_like_api = {
 
 	'DrawSplineLinearWASM':'''
 	DrawSplineLinearWASM(ptr,len,thick,fill, r,g,b,a){
-		const buf = this.wasm.instance.exports.memory.buffer
-		const p = new Float32Array(buf,ptr,len*2)
+		const buf=this.wasm.instance.exports.memory.buffer
+		const p=new Float32Array(buf,ptr,len*2)
 		this.ctx.strokeStyle = 'black'
-		if(fill) this.ctx.fillStyle='rgba('+(r*255)+','+(g*255)+','+(b*255)+','+a+')'
+		if(fill)this.ctx.fillStyle='rgba('+(r*255)+','+(g*255)+','+(b*255)+','+a+')'
 		this.ctx.lineWidth=thick
 		this.ctx.beginPath()
 		this.ctx.moveTo(p[0], p[1])
-		for (var i=2; i<p.length; i+=2){
-			this.ctx.lineTo(p[i], p[i+1])
+		for (var i=2;i<p.length;i+=2){
+			this.ctx.lineTo(p[i],p[i+1])
 		}
-		if (fill){
+		if(fill){
 			this.ctx.closePath()
 			this.ctx.fill()
 		}
@@ -1393,8 +1383,14 @@ def gen_js_api(world, c3, user_methods):
 		skip.append('DrawRectangleV')
 	if 'raylib::clear_background' not in c3:
 		skip.append('ClearBackground')
+	if 'raylib::get_random_value' not in c3:
+		skip.append('GetRandomValue')
 	if 'draw_spline_wasm' not in c3:
 		skip.append('DrawSplineLinearWASM')
+	if 'raylib::get_screen_width' not in c3:
+		skip.append('GetScreenWidth')
+	if 'raylib::get_screen_height' not in c3:
+		skip.append('GetScreenHeight')
 
 	js = [
 		JS_LIB_API,
@@ -1433,7 +1429,17 @@ def gen_js_api(world, c3, user_methods):
 
 	js.append('}')
 	js.append('new api()')
-	return '\n'.join(js)
+	js = '\n'.join(js)
+
+	if 'getColorFromMemory' in js or 'color_hex_unpacked' in js:
+		js = JS_LIB_COLOR_HELPERS + js
+
+	if world.c3_js13kb:
+		rmap = {'const ': 'var ', 'entryFunction':'ef', 'make_environment':'me', 'color_hex_unpacked':'cu', 'getColorFromMemory':'gm', 'cstr_by_ptr':'cp', 'cstrlen':'cl'}
+		for rep in rmap:
+			if rep in js:
+				js = js.replace(rep, rmap[rep])
+	return js
 
 def gen_html(world, wasm, c3, user_html=None, background='', user_methods={}, debug='--debug' in sys.argv):
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
