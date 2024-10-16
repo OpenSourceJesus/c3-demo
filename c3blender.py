@@ -1375,7 +1375,7 @@ def gen_js_api(world, c3, user_methods):
 		skip.append('DrawRectangleV')
 	if 'raylib::clear_background' not in c3:
 		skip.append('ClearBackground')
-	if 'DrawSplineLinearWASM' not in c3:
+	if 'draw_spline_wasm' not in c3:
 		skip.append('DrawSplineLinearWASM')
 
 	js = [
