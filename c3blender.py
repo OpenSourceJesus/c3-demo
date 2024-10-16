@@ -5,34 +5,30 @@ _thisdir = os.path.split(os.path.abspath(__file__))[0]
 sys.path.append(_thisdir)
 
 BLENDER = 'blender'
-if sys.platform == 'win32': # Windows
-	BLENDER = 'C:/Program Files/Blender Foundation/Blender 4.2/blender.exe'
-elif sys.platform == 'darwin': # Apple
-	BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender'
+if sys.platform == 'win32': BLENDER = 'C:/Program Files/Blender Foundation/Blender 4.2/blender.exe'
+elif sys.platform == 'darwin': BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender'
 
 
-EMSDK = os.path.join(_thisdir, "emsdk")
-MAX_SCRIPTS_PER_OBJECT = 8
-MAX_OBJECTS_PER_TEXT = 4
-
-if not os.path.isdir('c3'):
-	if not os.path.isfile('c3-ubuntu-20.tar.gz'):
-		cmd = 'wget -c https://github.com/c3lang/c3c/releases/download/latest/c3-ubuntu-20.tar.gz'
-		print(cmd)
-		subprocess.check_call(cmd.split())
-	cmd = 'tar -xvf c3-ubuntu-20.tar.gz'
-	print(cmd)
-	subprocess.check_call(cmd.split())
-
-C3 = os.path.abspath('./c3/c3c')
+C3 = '/usr/local/bin/c3c'
+if not os.path.isfile(C3):
+	C3 = '/opt/c3/c3c'
+	if not os.path.isfile(C3):
+		if not os.path.isdir('c3'):
+			if not os.path.isfile('c3-ubuntu-20.tar.gz'):
+				cmd = 'wget -c https://github.com/c3lang/c3c/releases/download/latest/c3-ubuntu-20.tar.gz'
+				print(cmd)
+				subprocess.check_call(cmd.split())
+			cmd = 'tar -xvf c3-ubuntu-20.tar.gz'
+			print(cmd)
+			subprocess.check_call(cmd.split())
+		C3 = os.path.abspath('./c3/c3c')
+print('c3c:', C3)
 assert os.path.isfile(C3)
 
+EMSDK = os.path.join(_thisdir, "emsdk")
 if "--install-wasm" in sys.argv and not os.path.isdir(EMSDK):
 	cmd = [
-		"git",
-		"clone",
-		"--depth",
-		"1",
+		"git","clone","--depth","1",
 		"https://github.com/emscripten-core/emsdk.git",
 	]
 	print(cmd)
@@ -45,14 +41,10 @@ if not EMCC and "--install-wasm" in sys.argv:
 	emsdk_update()
 
 
-def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True, raylib='./raylib.c3'):
+def build(input='./demo.c3', output='demo', wasm='--wasm' in sys.argv, opt='--opt' in sys.argv, run=True, raylib='./raylib.c3'):
 	cmd = [C3]
-	if wasm:
-		cmd += ['--target', 'wasm32']
-		#if os.path.isfile('./emsdk/upstream/bin/wasm-ld'):
-		#	cmd += ['--linker=custom', './emsdk/upstream/bin/wasm-ld']
-	else:
-		cmd += ['--target', 'linux-x64', '-l', './raylib-5.0_linux_amd64/lib/libraylib.a']
+	if wasm: cmd += ['--target', 'wasm32']
+	else: cmd += ['--target', 'linux-x64', '-l', './raylib-5.0_linux_amd64/lib/libraylib.a']
 	mode = 'compile'
 
 	cmd += [
@@ -63,8 +55,7 @@ def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True, ray
 		'-o', output,
 	]
 	if wasm:
-		cmd += ['--link-libc=no', '--use-stdlib=no', 
-			'--no-entry', '--reloc=none', '-z', '--export-table']
+		cmd += ['--link-libc=no', '--use-stdlib=no', '--no-entry', '--reloc=none', '-z', '--export-table']
 	else:
 		cmd += ['-l', 'glfw']
 
@@ -82,9 +73,7 @@ def build(input='./demo.c3', output='demo', wasm=False, opt=False, run=True, ray
 		if ln.endswith('.o'):
 			ofiles.append(ln.strip())
 	print(ofiles)
-	if run and not wasm:
-		subprocess.check_call(['/tmp/'+output])
-
+	if run and not wasm: subprocess.check_call(['/tmp/'+output])
 	if wasm:
 		return '/tmp/%s.wasm' % output
 	else:
@@ -122,7 +111,10 @@ if __name__=='__main__':
 		subprocess.check_call(cmd)
 		sys.exit()
 
+
 ## blender ##
+MAX_SCRIPTS_PER_OBJECT = 8
+MAX_OBJECTS_PER_TEXT = 4
 if not bpy:
 	if not os.path.isfile('/usr/bin/blender'):
 		print('did you install blender?')
@@ -626,8 +618,10 @@ def gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
 	x,y,z = ob.location * SCALE
 	sx,sy,sz = ob.scale
 	gkey = (dname, gquant)
+	## TODO only gen single packer per quant
+	qkey = gquant.split('bit')[0]
 	return [
-		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
+		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0) @extern("u%s") {' %(dname, gquant, qkey),
 		'	int j=0;',
 		'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
 		'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
@@ -905,7 +899,7 @@ def calc_stroke_width(stroke):
 		sw += p.pressure
 		#sw += p.strength
 	sw /= len(stroke.points)
-	return sw * 4
+	return sw * stroke.line_width * 0.05
 
 
 def calc_center(points):
@@ -924,6 +918,8 @@ _BUILD_INFO = {
 	'wasm'  : None,
 	'native-size':None,
 	'wasm-size':None,
+	'zip'     : None,
+	'zip-size': None,
 }
 @bpy.utils.register_class
 class C3Export(bpy.types.Operator):
@@ -947,8 +943,6 @@ class C3Export(bpy.types.Operator):
 		return True
 	def execute(self, context):
 		exe = build_wasm(context.world)
-		_BUILD_INFO['wasm']=exe
-		_BUILD_INFO['wasm-size']=len(open(exe,'rb').read())
 		return {"FINISHED"}
 
 @bpy.utils.register_class
@@ -960,20 +954,17 @@ class C3WorldPanel(bpy.types.Panel):
 	bl_context = "world"
 
 	def draw(self, context):
-		self.layout.prop(context.world, 'c3_export_res_x')
-		self.layout.prop(context.world, 'c3_export_res_y')
-		self.layout.prop(context.world, 'c3_export_scale')
-		self.layout.prop(context.world, 'c3_export_offset_x')
-		self.layout.prop(context.world, 'c3_export_offset_y')
+		row = self.layout.row()
+		row.prop(context.world, 'c3_export_res_x')
+		row.prop(context.world, 'c3_export_res_y')
+		row.prop(context.world, 'c3_export_scale')
+		row = self.layout.row()
+		row.prop(context.world, 'c3_export_offset_x')
+		row.prop(context.world, 'c3_export_offset_y')
 		self.layout.prop(context.world, 'c3_export_opt')
 		self.layout.prop(context.world, 'c3_export_html')
 
 		self.layout.operator("c3.export_wasm", icon="CONSOLE")
-		if _BUILD_INFO['wasm-size']:
-			if _BUILD_INFO['wasm-size'] < 1024*16:
-				self.layout.label(text="wasm bytes=%s" %( _BUILD_INFO['wasm-size'] ))
-			else:
-				self.layout.label(text="wasm KB=%s" %( _BUILD_INFO['wasm-size']//1024 ))
 		self.layout.operator("c3.export", icon="CONSOLE")
 		if _BUILD_INFO['native-size']:
 			self.layout.label(text="exe KB=%s" %( _BUILD_INFO['native-size']//1024 ))
@@ -985,11 +976,29 @@ class JS13KB_Panel(bpy.types.Panel):
 	bl_space_type = "PROPERTIES"
 	bl_region_type = "WINDOW"
 	bl_context = "world"
-
 	def draw(self, context):
-		self.layout.prop(context.world, 'c3_miniapi')
 		self.layout.prop(context.world, 'c3_js13kb')
+		row = self.layout.row()
+		row.prop(context.world, 'c3_miniapi')
+		row.prop(context.world, 'c3_invalid_html')
+		if context.world.c3_js13kb:
+			self.layout.prop(context.world, 'c3_export_zip')
+			if _BUILD_INFO['zip-size']:
+				self.layout.label(text=_BUILD_INFO['zip'])
+				if _BUILD_INFO['zip-size'] <= 1024*13:
+					self.layout.label(text="zip bytes=%s" %( _BUILD_INFO['zip-size'] ))
+				else:
+					self.layout.label(text="zip KB=%s" %( _BUILD_INFO['zip-size']//1024 ))
 
+				self.layout.label(text='html-size=%s' % _BUILD_INFO['html-size'])
+				self.layout.label(text='jslib-size=%s' % _BUILD_INFO['jslib-size'])
+				self.layout.label(text='jslib-gz-size=%s' % _BUILD_INFO['jslib-gz-size'])
+
+		if _BUILD_INFO['wasm-size']:
+			if _BUILD_INFO['wasm-size'] < 1024*16:
+				self.layout.label(text="wasm bytes=%s" %( _BUILD_INFO['wasm-size'] ))
+			else:
+				self.layout.label(text="wasm KB=%s" %( _BUILD_INFO['wasm-size']//1024 ))
 
 
 def build_linux(world):
@@ -1022,16 +1031,6 @@ $dec($0,1).then((js)=>{
 		});
 	});
 });
-'''
-
-JS_LIB_NOT_USED_YET = '''
-function color_hex(color) {
-	const r = ((color>>(0*8))&0xFF).toString(16).padStart(2, '0');
-	const g = ((color>>(1*8))&0xFF).toString(16).padStart(2, '0');
-	const b = ((color>>(2*8))&0xFF).toString(16).padStart(2, '0');
-	const a = ((color>>(3*8))&0xFF).toString(16).padStart(2, '0');
-	return "#"+r+g+b+a;
-}
 '''
 
 JS_LIB_API = '''
@@ -1417,53 +1416,7 @@ def gen_js_api(world, c3, user_methods):
 	js.append('new api()')
 	return '\n'.join(js)
 
-def compress_js(js):
-	assert '`' not in js
-	js = js.replace('\t', '')
-	js = js.replace('this.ctx', 'this.c').replace('const ', 'let ')
-	rep = [
-		'this.c.', 'this.wasm.instance.exports.memory.buffer', 'this.', 'Uint8Array', 'Float32Array', 
-		'window.requestAnimationFrame', 'function', 'return', 'canvas.', 
-		#'getColorFromMemory','.toString(16).padStart',
-	]
-	o = []
-	if 0:
-		vars = []
-		for idx, r in enumerate(rep):
-			if idx == 0:
-				key = '_'
-			else:
-				key = '_%s' % idx
-			vars.append('%s="%s"' % (key, r))
-			js = js.replace(r, '${%s}' % key)
-		o.append('var %s;' % ','.join(vars) )
-		o.append('eval`%s`' % js)
-		return '\n'.join(o)
-	else:
-		o=[
-		#'String.prototype.r=(a)=>{',
-		'	function $r(r,a){',
-		'	for(k in a){',
-		'		r=r.replaceAll(String.fromCharCode(k), a[k])',
-		'	}',
-		'	return r',
-		'}',
-		]
-		#ascii_bytes = [chr(i) for i in list(range(1,10))+list(range(14,31))]
-		#ascii_bytes.reverse()
-		ascii_bytes = [chr(i) for i in range(1,10)]
-		g = []
-		for idx, r in enumerate(rep):
-			bite = ascii_bytes.pop()
-			js = js.replace(r, bite)
-			#g[ord(bite)] = r
-			g.append(r)
-
-
-		o.append('var _$_=$r(`%s`,"%s".split(" "))' %(js, ' '.join(g) ))
-		return '\n'.join(o)
-
-def gen_html(world, wasm, c3, user_html=None, background='', test_precomp=False, user_methods={}):
+def gen_html(world, wasm, c3, user_html=None, background='', user_methods={}, debug='--debug' in sys.argv):
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
 	print(cmd)
 	subprocess.check_call(cmd)
@@ -1474,13 +1427,6 @@ def gen_html(world, wasm, c3, user_html=None, background='', test_precomp=False,
 	jtmp = '/tmp/c3api.js'
 	jslib = gen_js_api(world, c3, user_methods)
 
-	if test_precomp:
-		## after gz this will be a few bytes bigger
-		jslibcomp = compress_js(jslib)
-		print(jslibcomp)
-		print('jslib bytes:', len(jslib))
-		print('compressed:', len(jslibcomp))
-
 	open(jtmp,'w').write(jslib)
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
 	print(cmd)
@@ -1488,63 +1434,71 @@ def gen_html(world, wasm, c3, user_html=None, background='', test_precomp=False,
 	js = open(jtmp+'.gz','rb').read()
 	jsb = base64.b64encode(js).decode('utf-8')
 
-	if test_precomp:
-		jtmp = '/tmp/c3api.comp.js'
-		open(jtmp,'w').write(jslibcomp)
-		cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
-		print(cmd)
-		subprocess.check_call(cmd)
-		jsc = open(jtmp+'.gz','rb').read()
-		print('compressed.gz:', len(jsc))
-		jsbc = base64.b64encode(jsc).decode('utf-8')
-
 	if '--debug' in sys.argv:
 		background = 'red'
 	if background:
 		background = 'style="background-color:%s"' % background
 
-	o = [
-		'<html>',
-		'<body %s>' % background,
-		'<canvas id="$"></canvas>',
-		'<script>', 
-		'var $0="%s"' % jsb,
-		'var $1="%s"' % b,
-		JS_DECOMP.replace('\t',''), 
-		'</script>',
-	]
-	if user_html:
-		o += user_html
+	if world.c3_invalid_html:
+		o = [
+			'<canvas id="$"/>',
+			'<script>', 
+			'$0="%s"' % jsb,
+			'$1="%s"' % b,
+			JS_DECOMP.replace('\t','').replace('var ', ''), 
+			'</script>',
+		]
+		hsize = len('\n'.join(o))
 
-	hsize = len('\n'.join(o)) + len('</body></html>')
+	else:
+		o = [
+			'<html>',
+			'<body %s>' % background,
+			'<canvas id="$"></canvas>',
+			'<script>', 
+			'var $0="%s"' % jsb,
+			'var $1="%s"' % b,
+			JS_DECOMP.replace('\t',''), 
+			'</script>',
+		]
+		if user_html:
+			o += user_html
 
-	o += [
-		'<pre>',
-		'jslib bytes=%s' % len(jslib),
-		'jslib.gz bytes=%s' % len(js),
-		'jslib.base64 bytes=%s' % len(jsb),
+		hsize = len('\n'.join(o)) + len('</body></html>')
 
-		#'jslib.comp.gz bytes=%s' % len(jsc),
-		#'jslib.comp.base64 bytes=%s' % len(jsbc),
+	_BUILD_INFO['html-size'] = hsize
+	_BUILD_INFO['jslib-size'] = len(jslib)
+	_BUILD_INFO['jslib-gz-size'] = len(js)
 
-		'wasm bytes=%s' % len(wa),
-		'gzip bytes=%s' % len(w),
-		'base64 bytes=%s' % len(b),
-		'html bytes=%s' % (hsize- (len(b)+len(jsb)) ),
-		'total bytes=%s' % hsize,
-		'C3 optimization=%s' % WORLD.c3_export_opt,
+	if debug:
+		if world.c3_invalid_html:
+			o.append('</canvas>')
 
-	]
-	for ob in bpy.data.objects:
-		if ob.type=='GPENCIL':
-			o.append('%s = %s' % (ob.name, ob.data.c3_grease_quantize))
+		o += [
+			'<pre>',
+			'jslib bytes=%s' % len(jslib),
+			'jslib.gz bytes=%s' % len(js),
+			'jslib.base64 bytes=%s' % len(jsb),
+			'wasm bytes=%s' % len(wa),
+			'gzip bytes=%s' % len(w),
+			'base64 bytes=%s' % len(b),
+			'html bytes=%s' % (hsize- (len(b)+len(jsb)) ),
+			'total bytes=%s' % hsize,
+			'C3 optimization=%s' % WORLD.c3_export_opt,
 
-	o += [
-		'<pre>',
-		'</body>',
-		'</html>',
+		]
+		for ob in bpy.data.objects:
+			if ob.type=='GPENCIL':
+				o.append('%s = %s' % (ob.name, ob.data.c3_grease_quantize))
 
-	]
+		o.append('</pre>')
+
+	if not world.c3_invalid_html:
+		o += [
+			'</body>',
+			'</html>',
+
+		]
 
 	return '\n'.join(o)
 
@@ -1571,13 +1525,35 @@ def build_wasm( world ):
 		wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt, raylib=rtmp)
 	else:
 		wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt)
+
+
+	_BUILD_INFO['wasm']=wasm
+	_BUILD_INFO['wasm-size']=len(open(wasm,'rb').read())
+
 	#os.system('cp -v ./index.html /tmp/.')
 	#os.system('cp -v ./raylib.js /tmp/.')
 	html = gen_html(world, wasm, o, user_html, user_methods=user_methods)
-	if world.c3_js13kb:
-		if len(html.encode('utf-8')) > 1024*13:
-			raise SyntaxError('final html is over 13KB')
 	open('/tmp/index.html', 'w').write(html)
+	if world.c3_js13kb:
+		if os.path.isfile('/usr/bin/zip'):
+			cmd = ['zip', '-9', 'index.html.zip', 'index.html']
+			print(cmd)
+			subprocess.check_call(cmd, cwd='/tmp')
+			zip = open('/tmp/index.html.zip','rb').read()
+			_BUILD_INFO['zip-size'] = len(zip)
+
+			if world.c3_export_zip:
+				out = os.path.expanduser(world.c3_export_zip)
+				if not out.endswith('.zip'): out += '.zip'
+				_BUILD_INFO['zip'] = out
+				print('saving:', out)
+				open(out,'wb').write(zip)
+			else:
+				_BUILD_INFO['zip'] = '/tmp/index.html.zip'
+
+		else:
+			if len(html.encode('utf-8')) > 1024*13:
+				raise SyntaxError('final html is over 13KB')
 
 	if WASM_OBJDUMP:
 		cmd = [WASM_OBJDUMP, '--syms', wasm]
@@ -1605,9 +1581,11 @@ bpy.types.World.c3_export_scale = bpy.props.FloatProperty(name="scale", default=
 bpy.types.World.c3_export_offset_x = bpy.props.IntProperty(name="offset X", default=100)
 bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name="offset Y", default=100)
 
-bpy.types.World.c3_export_html = bpy.props.StringProperty(name="c3 export path (.html)")
+bpy.types.World.c3_export_html = bpy.props.StringProperty(name="c3 export (.html)")
+bpy.types.World.c3_export_zip = bpy.props.StringProperty(name="c3 export (.zip)")
 bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name="c3 minifiy js/wasm api calls")
-bpy.types.World.c3_js13kb = bpy.props.BoolProperty(name="error on export if output is over 13KB")
+bpy.types.World.c3_js13kb = bpy.props.BoolProperty(name="js13k: error on export if output is over 13KB")
+bpy.types.World.c3_invalid_html = bpy.props.BoolProperty(name="save space with invalid html wrapper")
 
 bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
 	name='optimize',
@@ -1785,7 +1763,9 @@ if __name__=='__main__':
 		elif arg=='--minifiy':
 			bpy.data.worlds[0].c3_miniapi = True
 		elif arg=='--js13k':
+			bpy.data.worlds[0].c3_miniapi = True
 			bpy.data.worlds[0].c3_js13kb = True
+			bpy.data.worlds[0].c3_invalid_html = True
 
 	if '--test' in sys.argv or test:
 		import c3blendgen
