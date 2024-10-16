@@ -186,6 +186,9 @@ fn void Object.add_char(Object *obj, char c) {
 fn void Object.css_scale(Object *obj, float scale) {
 	html_css_scale(obj.id, scale);
 }
+fn void Object.css_scale_y(Object *obj, float scale) {
+	html_css_scale_y(obj.id, scale);
+}
 fn void Object.css_zindex(Object *obj, int z) {
 	html_set_zindex(obj.id, z);
 }
@@ -227,6 +230,8 @@ def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
 WASM_EXTERN = '''
+extern fn float random () @extern("random");
+
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, float r, float g, float b, float a) @extern("DrawSplineLinearWASM");
 
@@ -238,6 +243,7 @@ extern fn void html_add_char (int id, char c) @extern("html_add_char");
 
 extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");
 extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");
+extern fn void html_css_scale_y (int id, float scale) @extern("html_css_scale_y");
 
 extern fn void html_set_zindex (int id, int z) @extern("html_set_zindex");
 extern fn void html_canvas_clear () @extern("html_canvas_clear");
@@ -1152,6 +1158,13 @@ c3dom_api = {
 	}
 	''',
 
+	'html_css_scale_y':'''
+	html_css_scale_y(idx, sz){
+		this.elts[idx].style.transform='scaleY('+sz+')'
+	}
+	''',
+
+
 	'html_set_position':'''
 	html_set_position(idx,x,y){
 		var elt = this.elts[idx]
@@ -1208,6 +1221,12 @@ c3dom_api = {
 	'wasm_size':'''
 	wasm_size(){
 		return this.bytes.length
+	}
+	''',
+
+	'random':'''
+	random(){
+		return Math.random()
 	}
 	''',
 
