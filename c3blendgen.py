@@ -341,3 +341,111 @@ def test8(quant=None, wasm_simple_stroke_opt=None):
 	txt.c3_extern = 'fn void wasm2art(int c) @extern("wa") @wasm'
 	ob.c3_method0 = txt
 
+def mkmonkey(skip_materials=['Skin_Light'], line_width=0.8):
+	bpy.ops.object.gpencil_add(type='MONKEY')
+	mob = bpy.context.active_object
+	mob.hide_set(True)
+
+	bpy.ops.object.gpencil_add(type='EMPTY')
+	ob = bpy.context.active_object
+	ob.location.x = 3
+	ob.data.materials[0] = mob.data.materials[0]
+	for mat in mob.data.materials[1:]:
+		ob.data.materials.append(mat)
+
+	layer = ob.data.layers[0]  ## default GP_Layer
+	frame = layer.frames[0]
+	eyes = []
+	for a in mob.data.layers[0].frames[0].strokes:
+		mat = mob.data.materials[a.material_index]
+		if mat.name in skip_materials:
+			continue
+		if mat.name == 'Eyes':
+			eyes.append(a)
+			continue
+		b = frame.strokes.new()
+		b.line_width=a.line_width
+		print(b.line_width)
+
+		b.material_index = a.material_index
+		b.points.add(len(a.points))
+		for i in range(len(a.points)):
+			b.points[i].co = a.points[i].co
+			b.points[i].pressure = line_width
+
+	elayer = ob.data.layers.new(name='EYES')
+	frame = elayer.frames.new(1)
+	for a in eyes:
+		b = frame.strokes.new()
+		b.line_width=a.line_width
+		print(b.line_width)
+
+		b.material_index = a.material_index
+		b.points.add(len(a.points))
+		for i in range(len(a.points)):
+			b.points[i].co = a.points[i].co
+			b.points[i].pressure = line_width
+
+	for mat in ob.data.materials:
+		mat.grease_pencil.show_stroke = True
+		mat.grease_pencil.color = [0,0,0,1]
+
+
+	return ob
+
+EXAMPLE9 = '''
+if (raylib::get_random_value(0,100) < 5){
+	if (self.myprop) {
+		self.myprop = 0;
+	} else {
+		self.myprop = 1;
+	}
+}
+
+if (self.myprop){
+	self.set_text("(-)");
+	$object0.set_text("(-)");
+} else {
+	self.set_text("(@)");
+	$object0.set_text("(@)");
+}
+
+'''
+
+
+def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
+	cube = bpy.data.objects['Cube']
+	cube.hide_set(True)
+
+	mo = mkmonkey()
+	if wasm_simple_stroke_opt:
+		mo.data.c3_grease_optimize=int(wasm_simple_stroke_opt)
+	if quant:
+		mo.data.c3_grease_quantize = quant
+
+	txt = bpy.data.texts.new(name='example9.c3')
+	txt.from_string(EXAMPLE9)
+
+	fsize = 0.25
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.data.body = 'O'
+	ob.data.size = fsize
+	ob.rotation_euler.x = math.pi/2
+	ob.location.x -= 0.5
+	ob.location.z -= 0.02
+	ob.data.extrude = 0.18
+	ob.parent = mo
+	ob.c3_script0 = txt
+	ob['myprop'] = 0
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.data.body = 'o'
+	ob.data.size = fsize
+	ob.rotation_euler.x = math.pi/2
+	ob.location.x = 0.22
+	ob.location.z -= 0.02
+	ob.data.extrude = 0.18
+	ob.parent = mo
+	txt.object0 = ob
