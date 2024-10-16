@@ -395,14 +395,16 @@ def mkmonkey(skip_materials=['Skin_Light'], line_width=0.8):
 
 EXAMPLE9 = '''
 if (raylib::get_random_value(0,100) < 5){
-	if (self.myprop) {
-		self.myprop = 0;
-	} else {
-		self.myprop = 1;
-	}
+	if (self.blinking) {self.blinking = 0;}
+	else {self.blinking = 1;}
+}
+if (raylib::get_random_value(0,100) < 5){
+	if (self.talking) {self.talking=0;}
+	else {self.talking = 1;}
 }
 
-if (self.myprop){
+
+if (self.blinking){
 	self.set_text("(-)");
 	$object0.set_text("(-)");
 } else {
@@ -410,6 +412,17 @@ if (self.myprop){
 	$object0.set_text("(@)");
 }
 
+if (self.talking) {
+	if (raylib::get_random_value(0,100) < 20){
+		$object1.set_text("👄");
+	} else {
+		$object1.set_text("🫦");
+	}
+	$object1.css_scale_y(random()+0.3);
+} else {
+	$object1.set_text("🫦");
+	$object1.css_scale_y(0.3);
+}
 '''
 
 
@@ -418,6 +431,7 @@ def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	cube.hide_set(True)
 
 	mo = mkmonkey()
+	mo.data.materials['Skin'].grease_pencil.fill_color = [random(), random(), random(), 1]
 	if wasm_simple_stroke_opt:
 		mo.data.c3_grease_optimize=int(wasm_simple_stroke_opt)
 	if quant:
@@ -437,7 +451,8 @@ def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	ob.data.extrude = 0.18
 	ob.parent = mo
 	ob.c3_script0 = txt
-	ob['myprop'] = 0
+	ob['blinking'] = 0
+	ob['talking'] = 0
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
@@ -449,3 +464,14 @@ def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	ob.data.extrude = 0.18
 	ob.parent = mo
 	txt.object0 = ob
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.data.body = '🫦'
+	ob.data.size = fsize * 2
+	ob.rotation_euler.x = math.pi/2
+	ob.location.x = -0.25
+	ob.location.z -= 0.85
+	ob.data.extrude = 0.18
+	ob.parent = mo
+	txt.object1 = ob
