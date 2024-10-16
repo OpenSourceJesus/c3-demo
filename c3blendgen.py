@@ -394,11 +394,11 @@ def mkmonkey(skip_materials=['Skin_Light'], line_width=0.8):
 	return ob
 
 EXAMPLE9 = '''
-if (raylib::get_random_value(0,100) < 5){
+if (random() < 0.05){
 	if (self.blinking) {self.blinking = 0;}
 	else {self.blinking = 1;}
 }
-if (raylib::get_random_value(0,100) < 5){
+if (random() < 0.05){
 	if (self.talking) {self.talking=0;}
 	else {self.talking = 1;}
 }
@@ -413,7 +413,7 @@ if (self.blinking){
 }
 
 if (self.talking) {
-	if (raylib::get_random_value(0,100) < 20){
+	if (random() < 0.2){
 		$object1.set_text("👄");
 	} else {
 		$object1.set_text("🫦");
@@ -424,7 +424,6 @@ if (self.talking) {
 	$object1.css_scale_y(0.3);
 }
 '''
-
 
 def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	cube = bpy.data.objects['Cube']
