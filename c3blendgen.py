@@ -1,4 +1,4 @@
-import bpy, math, mathutils
+import sys, bpy, math, mathutils
 from random import random, uniform, choice
 
 EXAMPLE1 = '''
@@ -341,7 +341,7 @@ def test8(quant=None, wasm_simple_stroke_opt=None):
 	txt.c3_extern = 'fn void wasm2art(int c) @extern("wa") @wasm'
 	ob.c3_method0 = txt
 
-def mkmonkey(skip_materials=['Skin_Light'], line_width=0.8):
+def mkmonkey(skip_materials=['Skin_Light'], line_width=0.8, eyes_as_symbols=False):
 	bpy.ops.object.gpencil_add(type='MONKEY')
 	mob = bpy.context.active_object
 	mob.hide_set(True)
@@ -373,18 +373,32 @@ def mkmonkey(skip_materials=['Skin_Light'], line_width=0.8):
 			b.points[i].co = a.points[i].co
 			b.points[i].pressure = line_width
 
-	elayer = ob.data.layers.new(name='EYES')
-	frame = elayer.frames.new(1)
-	for a in eyes:
-		b = frame.strokes.new()
-		b.line_width=a.line_width
-		print(b.line_width)
+	if eyes_as_symbols:
+		fsize = 0.4
+		bpy.ops.object.text_add()
+		t = bpy.context.active_object
+		t.name='_'  ## skips name in html dom
+		t.data.body = '⚪ ⚪'
+		t.data.size = fsize
+		t.rotation_euler.x = math.pi/2
+		t.location.x -= 0.5
+		t.location.z -= 0.02
+		t.data.extrude = 0.1
+		t.parent = ob
 
-		b.material_index = a.material_index
-		b.points.add(len(a.points))
-		for i in range(len(a.points)):
-			b.points[i].co = a.points[i].co
-			b.points[i].pressure = line_width
+	else:
+		elayer = ob.data.layers.new(name='EYES')
+		frame = elayer.frames.new(1)
+		for a in eyes:
+			b = frame.strokes.new()
+			b.line_width=a.line_width
+			print(b.line_width)
+
+			b.material_index = a.material_index
+			b.points.add(len(a.points))
+			for i in range(len(a.points)):
+				b.points[i].co = a.points[i].co
+				b.points[i].pressure = line_width
 
 	for mat in ob.data.materials:
 		mat.grease_pencil.show_stroke = True
@@ -429,8 +443,9 @@ def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	cube = bpy.data.objects['Cube']
 	cube.hide_set(True)
 
-	mo = mkmonkey()
-	mo.data.materials['Skin'].grease_pencil.fill_color = [random(), random(), random(), 1]
+	mo = mkmonkey( eyes_as_symbols=True )
+	mo.data.materials['Skin'].grease_pencil.fill_color = [0.5, 0.8, 0.6, 1]
+
 	if wasm_simple_stroke_opt:
 		mo.data.c3_grease_optimize=int(wasm_simple_stroke_opt)
 	if quant:
@@ -442,6 +457,7 @@ def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	fsize = 0.25
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
+	ob.name='_'
 	ob.data.body = 'O'
 	ob.data.size = fsize
 	ob.rotation_euler.x = math.pi/2
@@ -455,6 +471,7 @@ def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
+	ob.name='a'
 	ob.data.body = 'o'
 	ob.data.size = fsize
 	ob.rotation_euler.x = math.pi/2
@@ -466,6 +483,7 @@ def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
+	ob.name='b'
 	ob.data.body = '🫦'
 	ob.data.size = fsize * 2
 	ob.rotation_euler.x = math.pi/2
