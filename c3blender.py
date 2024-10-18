@@ -233,7 +233,7 @@ WASM_EXTERN = '''
 extern fn float random () @extern("random");
 
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
-extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, float r, float g, float b, float a) @extern("DrawSplineLinearWASM");
+extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
 extern fn int html_new (char *ptr) @extern("html_new");
 extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
@@ -315,7 +315,8 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 		z += offy
 		sx,sy,sz = ob.scale * SCALE
 		idx = len(meshes)
-		head.append('short %s_id=%s;' % (sname,idx))
+		if not ob.name.startswith('_'):
+			head.append('short %s_id=%s;' % (sname,idx))
 
 		scripts = []
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
@@ -424,9 +425,13 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				x,y,z = ob.location * SCALE
 				z = -z
 
+			dom_name = ob.name
+			if dom_name.startswith('_'):
+				dom_name = ''
+
 			setup += [
 				'	objects[%s].position={%s,%s};' % (idx, x+(cscale*0.1),z-(cscale*1.8)),
-				'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale, hide, ob.name),
+				'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale, hide, dom_name),
 			]
 			if ob.c3_onclick:
 				tname = safename(ob.c3_onclick)
@@ -608,6 +613,9 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 
 	for a in datas[dname]['draw']:
 		r,g,b,alpha = a['color']
+		r = int(r*255)
+		g = int(g*255)
+		b = int(b*255)
 		if not scripts:
 			## static grease pencil
 			draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r,g,b,alpha))
@@ -1019,41 +1027,38 @@ def build_linux(world):
 	return bin
 
 JS_DECOMP = '''
-var $=null
-var $dec=async(u,t)=>{
+var $d=async(u,t)=>{
 	var d=new DecompressionStream('gzip')
 	var r=await fetch('data:application/octet-stream;base64,'+u)
 	var b=await r.blob()
 	var s=b.stream().pipeThrough(d)
 	var o=await new Response(s).blob()
-	if(t) return await o.text();
-	else return await o.arrayBuffer();
+	if(t) return await o.text()
+	else return await o.arrayBuffer()
 }
-$dec($0,1).then((js)=>{
-	$=eval(js);
-	$dec($1).then((r)=>{
-		WebAssembly.instantiate(r,{env:$.$proxy()}).then((res)=>{
-			$.$reset(res,"$",r)
-		});
+$d($0,1).then((j)=>{
+	$=eval(j)
+	$d($1).then((r)=>{
+		WebAssembly.instantiate(r,{env:$.proxy()}).then((c)=>{$.reset(c,"$",r)});
 	});
 });
 '''
 
 JS_LIB_COLOR_HELPERS = '''
 function color_hex_unpacked(r,g,b,a){
-	r=r.toString(16).padStart(2,'0')
-	g=g.toString(16).padStart(2,'0')
-	b=b.toString(16).padStart(2,'0')
-	a=a.toString(16).padStart(2,'0')
+	r=r.toString(16).padStart(2,'0');
+	g=g.toString(16).padStart(2,'0');
+	b=b.toString(16).padStart(2,'0');
+	a=a.toString(16).padStart(2,'0');
 	return "#"+r+g+b+a
 }
 function getColorFromMemory(buf,ptr){
-	const [r,g,b,a]=new Uint8Array(buf,ptr,4)
+	const [r,g,b,a]=new Uint8Array(buf,ptr,4);
 	return color_hex_unpacked(r,g,b,a)
 }
 '''
 
-JS_LIB_API = '''
+JS_LIB_API_ENV = '''
 function make_environment(e){
 	return new Proxy(e,{
 		get(t,p,r) {
@@ -1062,40 +1067,50 @@ function make_environment(e){
 		}
 	});
 }
+'''
 
+JS_LIB_API_ENV_MINI = '''
+function make_environment(e){
+	return new Proxy(e,{
+		get(t,p,r){return e[p].bind(e)}
+	});
+}
+'''
+
+
+JS_LIB_API = '''
 function cstrlen(m,p){
-	var l=0
+	var l=0;
 	while(m[p]!=0){l++;p++}
-	return l
+	return l;
 }
 
 function cstr_by_ptr(m,p){
-	const l=cstrlen(new Uint8Array(m),p)
-	const b=new Uint8Array(m,p,l)
+	const l=cstrlen(new Uint8Array(m),p);
+	const b=new Uint8Array(m,p,l);
 	return new TextDecoder().decode(b)
 }
 
 class api{
-	$proxy(){
+	proxy(){
 		return make_environment(this)
 	}
-	$reset(wasm,id,bytes){
-		this.elts=[]
-		this.wasm=wasm
-		this.bytes=new Uint8Array(bytes)
-		this.canvas=document.getElementById(id)
-		this.ctx=this.canvas.getContext("2d")
-		this.wasm.instance.exports.main()
-		const next=(timestamp)=>{
-			if(this.quit)return;
-			this.dt=(timestamp-this.previous)/1000.0
-			this.previous=timestamp
-			this.entryFunction()
-			window.requestAnimationFrame(next)
+	reset(wasm,id,bytes){
+		this.elts=[];
+		this.wasm=wasm;
+		this.bytes=new Uint8Array(bytes);
+		this.canvas=document.getElementById(id);
+		this.ctx=this.canvas.getContext('2d');
+		this.wasm.instance.exports.main();
+		const f=(ts)=>{
+			this.dt=(ts-this.prev)/1000;
+			this.prev=ts;
+			this.entryFunction();
+			window.requestAnimationFrame(f)
 		};
-		window.requestAnimationFrame((timestamp)=>{
-			this.previous=timestamp
-			window.requestAnimationFrame(next)
+		window.requestAnimationFrame((ts)=>{
+			this.prev=ts;
+			window.requestAnimationFrame(f)
 		});
 	}
 '''
@@ -1104,27 +1119,27 @@ class api{
 c3dom_api = {
 	'html_new' : '''
 	html_new(ptr){
-		var elt=document.createElement(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr))
-		elt.style.position='absolute'
-		this.elts.push(elt)
-		document.body.appendChild(elt)
+		var elt=document.createElement(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr));
+		elt.style.position='absolute';
+		this.elts.push(elt);
+		document.body.appendChild(elt);
 		return this.elts.length-1
 	}
 	''',
 
 	'html_new_text' : '''
 	html_new_text(ptr,x,y,sz,viz,id){
-		var elt=document.createElement('pre')
-		elt.style.transformOrigin='left'
-		elt.style.position='absolute'
-		elt.style.left=x
-		elt.style.top=y
-		elt.style.fontSize=sz
-		elt.hidden=viz
-		elt.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,id)
-		this.elts.push(elt)
-		document.body.appendChild(elt)
-		elt.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr))
+		var elt=document.createElement('pre');
+		elt.style.transformOrigin='left';
+		elt.style.position='absolute';
+		elt.style.left=x;
+		elt.style.top=y;
+		elt.style.fontSize=sz;
+		elt.hidden=viz;
+		elt.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,id);
+		this.elts.push(elt);
+		document.body.appendChild(elt);
+		elt.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr));
 		return this.elts.length-1
 	}
 	''',
@@ -1157,8 +1172,8 @@ c3dom_api = {
 
 	'html_set_position':'''
 	html_set_position(idx,x,y){
-		var elt = this.elts[idx]
-		elt.style.left = x
+		var elt = this.elts[idx];
+		elt.style.left = x;
 		elt.style.top = y
 	}
 	''',
@@ -1171,10 +1186,10 @@ c3dom_api = {
 
 	'html_bind_onclick':'''
 	html_bind_onclick(idx,f,oidx){
-		var elt=this.elts[idx]
-		elt._onclick_=this.wasm.instance.exports.__indirect_function_table.get(f)
+		var elt=this.elts[idx];
+		elt._onclick_=this.wasm.instance.exports.__indirect_function_table.get(f);
 		elt.onclick=function(){
-			self=elt
+			self=elt;
 			elt._onclick_(oidx)
 		}
 	}
@@ -1183,7 +1198,7 @@ c3dom_api = {
 
 	'html_eval':'''
 	html_eval(ptr){
-		var _=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
+		var _=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr);
 		eval(_)
 	}
 	''',
@@ -1191,14 +1206,14 @@ c3dom_api = {
 
 	'html_canvas_clear':'''
 	html_canvas_clear(){
-		this.ctx.clearRect(0,0,this.ctx.canvas.width,this.ctx.canvas.height)
+		this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height)
 	}
 	''',
 
 	'html_canvas_resize' : '''
 	html_canvas_resize(w,h){
-		this.ctx.canvas.width=w
-		this.ctx.canvas.height=h
+		this.canvas.width=w;
+		this.canvas.height=h
 	}
 	''',
 
@@ -1232,54 +1247,52 @@ raylib_like_api = {
 
 	'InitWindow' : '''
 	InitWindow(w,h,ptr){
-		this.ctx.canvas.width=w
-		this.ctx.canvas.height=h
-		const buf=this.wasm.instance.exports.memory.buffer
+		this.canvas.width=w;
+		this.canvas.height=h;
+		const buf=this.wasm.instance.exports.memory.buffer;
 		document.title = cstr_by_ptr(buf,ptr)
 	}
 	''',
 	'GetScreenWidth':'''
 	GetScreenWidth(){
-		return this.ctx.canvas.width
+		return this.canvas.width
 	}
 	''',
 
 	'GetScreenHeight':'''
 	GetScreenHeight(){
-		return this.ctx.canvas.height
+		return this.canvas.height
 	}
 	''',
 
 	'GetFrameTime':'''
 	GetFrameTime(){
-		return Math.min(this.dt,1.0/60)
+		return Math.min(this.dt,1/30/2)
 	}
 	''',
 
 	'DrawRectangleV':'''
 	DrawRectangleV(pptr,sptr,cptr){
-		const buf=this.wasm.instance.exports.memory.buffer
-		const p=new Float32Array(buf,pptr,2)
-		const s=new Float32Array(buf,sptr,2)
-		this.ctx.fillStyle = getColorFromMemory(buf, cptr)
+		const buf=this.wasm.instance.exports.memory.buffer;
+		const p=new Float32Array(buf,pptr,2);
+		const s=new Float32Array(buf,sptr,2);
+		this.ctx.fillStyle = getColorFromMemory(buf, cptr);
 		this.ctx.fillRect(p[0],p[1],s[0],s[1])
 	}
 	''',
 
 	'DrawSplineLinearWASM':'''
-	DrawSplineLinearWASM(ptr,len,thick,fill, r,g,b,a){
-		const buf=this.wasm.instance.exports.memory.buffer
-		const p=new Float32Array(buf,ptr,len*2)
-		this.ctx.strokeStyle = 'black'
-		if(fill)this.ctx.fillStyle='rgba('+(r*255)+','+(g*255)+','+(b*255)+','+a+')'
-		this.ctx.lineWidth=thick
-		this.ctx.beginPath()
-		this.ctx.moveTo(p[0], p[1])
-		for (var i=2;i<p.length;i+=2){
-			this.ctx.lineTo(p[i],p[i+1])
-		}
+	DrawSplineLinearWASM(ptr,l,t,fill,r,g,b,a){
+		const buf=this.wasm.instance.exports.memory.buffer;
+		const p=new Float32Array(buf,ptr,l*2);
+		this.ctx.strokeStyle='black';
+		if(fill)this.ctx.fillStyle='rgba('+r+','+g+','+b+','+a+')';
+		this.ctx.lineWidth=t;
+		this.ctx.beginPath();
+		this.ctx.moveTo(p[0], p[1]);
+		for (var i=2;i<p.length;i+=2)this.ctx.lineTo(p[i],p[i+1]);
 		if(fill){
-			this.ctx.closePath()
+			this.ctx.closePath();
 			this.ctx.fill()
 		}
 		this.ctx.stroke()
@@ -1288,21 +1301,21 @@ raylib_like_api = {
 
 	'DrawCircleWASM':'''
 	DrawCircleWASM(x,y,rad,ptr){
-		const buf=this.wasm.instance.exports.memory.buffer
-		const [r,g,b,a]=new Uint8Array(buf, ptr, 4)
-		this.ctx.strokeStyle = 'black'
-		this.ctx.beginPath()
-		this.ctx.arc(x,y,rad,0,2*Math.PI,false)
-		this.ctx.fillStyle = color_hex_unpacked(r,g,b,a)
-		this.ctx.closePath()
+		const buf=this.wasm.instance.exports.memory.buffer;
+		const [r,g,b,a]=new Uint8Array(buf, ptr, 4);
+		this.ctx.strokeStyle = 'black';
+		this.ctx.beginPath();
+		this.ctx.arc(x,y,rad,0,2*Math.PI,false);
+		this.ctx.fillStyle = color_hex_unpacked(r,g,b,a);
+		this.ctx.closePath();
 		this.ctx.stroke()
 	}
 	''',
 
 	'ClearBackground':'''
 	ClearBackground(ptr) {
-		this.ctx.fillStyle = getColorFromMemory(this.wasm.instance.exports.memory.buffer, ptr)
-		this.ctx.fillRect(0,0,this.ctx.canvas.width,this.ctx.canvas.height)
+		this.ctx.fillStyle = getColorFromMemory(this.wasm.instance.exports.memory.buffer, ptr);
+		this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height)
 	}
 	''',
 
@@ -1352,6 +1365,7 @@ raylib_like_api_mini = {}
 c3dom_api_mini = {}
 def gen_mini_api():
 	syms = list(string.ascii_lowercase)
+	syms.remove('j')
 	for fname in raylib_like_api:
 		code = raylib_like_api[fname].strip()
 		if code.startswith(fname):
@@ -1392,9 +1406,13 @@ def gen_js_api(world, c3, user_methods):
 	if 'raylib::get_screen_height' not in c3:
 		skip.append('GetScreenHeight')
 
-	js = [
-		JS_LIB_API,
-	]
+	if world.c3_js13kb:
+		js = [JS_LIB_API_ENV_MINI, JS_LIB_API]
+	else:
+		js = [
+			JS_LIB_API_ENV,
+			JS_LIB_API,
+		]
 	for fname in raylib_like_api:
 		if fname in skip:
 			print('skipping:', fname)
@@ -1435,7 +1453,14 @@ def gen_js_api(world, c3, user_methods):
 		js = JS_LIB_COLOR_HELPERS + js
 
 	if world.c3_js13kb:
-		rmap = {'const ': 'var ', 'entryFunction':'ef', 'make_environment':'me', 'color_hex_unpacked':'cu', 'getColorFromMemory':'gm', 'cstr_by_ptr':'cp', 'cstrlen':'cl'}
+		js = js.replace('\t','').replace('\n','')
+		rmap = {
+			'const ': 'var ', 'entryFunction':'ef', 'make_environment':'me', 
+			'color_hex_unpacked':'cu', 'getColorFromMemory':'gm', 
+			'cstr_by_ptr':'cp', 'cstrlen':'cl',
+			'this.canvas':'this.can',
+			'window.requestAnimationFrame':'_',
+		}
 		for rep in rmap:
 			if rep in js:
 				js = js.replace(rep, rmap[rep])
@@ -1466,10 +1491,12 @@ def gen_html(world, wasm, c3, user_html=None, background='', user_methods={}, de
 
 	if world.c3_invalid_html:
 		o = [
-			'<canvas id="$"/>',
+			'<canvas id="$">',
 			'<script>', 
+			'_=requestAnimationFrame',
 			'$0="%s"' % jsb,
 			'$1="%s"' % b,
+			#JS_DECOMP.replace('\t','').replace('var ', '').replace('\n',''), ## breaks invalid canvas above
 			JS_DECOMP.replace('\t','').replace('var ', ''), 
 			'</script>',
 		]
