@@ -178,19 +178,19 @@ struct Object {
 
 HEADER_OBJECT_WASM = '''
 fn void Object.set_text(Object *obj, char *txt) {
-	html_set_text(obj.id, txt);
+	html_set_text (obj.id, txt);
 }
 fn void Object.add_char(Object *obj, char c) {
-	html_add_char(obj.id, c);
+	html_add_char (obj.id, c);
 }
 fn void Object.css_scale(Object *obj, float scale) {
-	html_css_scale(obj.id, scale);
+	html_css_scale (obj.id, scale);
 }
 fn void Object.css_scale_y(Object *obj, float scale) {
-	html_css_scale_y(obj.id, scale);
+	html_css_scale_y (obj.id, scale);
 }
 fn void Object.css_zindex(Object *obj, int z) {
-	html_set_zindex(obj.id, z);
+	html_css_zindex (obj.id, z);
 }
 
 '''
@@ -245,7 +245,7 @@ extern fn void html_set_position (int id, float x, float y) @extern("html_set_po
 extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");
 extern fn void html_css_scale_y (int id, float scale) @extern("html_css_scale_y");
 
-extern fn void html_set_zindex (int id, int z) @extern("html_set_zindex");
+extern fn void html_css_zindex (int id, int z) @extern("html_css_zindex");
 extern fn void html_canvas_clear () @extern("html_canvas_clear");
 extern fn void html_canvas_resize (int x, int y) @extern("html_canvas_resize");
 
@@ -258,6 +258,19 @@ extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
 
 '''
+
+def get_scripts(ob):
+	scripts = []
+	for i in range(MAX_SCRIPTS_PER_OBJECT):
+		txt = getattr(ob, "c3_script" + str(i))
+		if txt: scripts.append(macro_pointers(txt))
+	return scripts
+
+def has_scripts(ob):
+	for i in range(MAX_SCRIPTS_PER_OBJECT):
+		txt = getattr(ob, "c3_script" + str(i))
+		if txt: return True
+	return False
 
 
 def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
@@ -304,7 +317,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 	meshes = []
 	datas = {}
 	ascii_letters = list(string.ascii_uppercase)
-
+	prevparent = None
 	for ob in bpy.data.objects:
 		if ob.hide_get(): continue
 		print(ob)
@@ -398,9 +411,10 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
 		elif ob.type=='GPENCIL':
 			meshes.append(ob)
-			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
-			sx,sy,sz = ob.scale
-			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
+			if has_scripts(ob):
+				setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
+				sx,sy,sz = ob.scale
+				setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
 
 			if wasm:
 				grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, idx)
@@ -429,10 +443,20 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			if dom_name.startswith('_'):
 				dom_name = ''
 
-			setup += [
-				'	objects[%s].position={%s,%s};' % (idx, x+(cscale*0.1),z-(cscale*1.8)),
-				'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale, hide, dom_name),
-			]
+			if ob.parent and has_scripts(ob.parent):
+				setup += [
+					'	objects[%s].position={%s,%s};' % (idx, x+(cscale*0.1),z-(cscale*1.8)),
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale, hide, dom_name),
+				]
+			elif ob.parent:
+				fx = x+(cscale*0.1)
+				fy = z-(cscale*1.8)
+				fx += (ob.parent.location.x * SCALE) + offx
+				fy += (ob.parent.location.z * SCALE) + offy
+				setup += [
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, fx,fy, cscale, hide, dom_name),
+				]
+
 			if ob.c3_onclick:
 				tname = safename(ob.c3_onclick)
 				if wasm and ascii_letters:
@@ -451,9 +475,9 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 					]
 				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
 			if ob.location.y >= 0.1:
-				setup.append('	html_set_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y*10)))
+				setup.append('	html_css_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y*10)))
 			elif ob.location.y <= -0.1:
-				setup.append('	html_set_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
+				setup.append('	html_css_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
 
 			draw.append('	self = objects[%s];' % idx)
 
@@ -471,9 +495,12 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 							s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
 					draw.append('\t' + s)
 
-			if ob.parent:
+			if ob.parent and has_scripts(ob.parent):
+				if prevparent != ob.parent.name:
+					prevparent = ob.parent.name
+					draw.append('parent = objects[%s_id];' % safename(ob.parent))
 				draw += [
-					'parent = objects[%s_id];' % safename(ob.parent),
+					#'parent = objects[%s_id];' % safename(ob.parent),
 					#'self.position.x=parent.position.x;',
 					#'self.position.y=parent.position.y;',
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
@@ -618,7 +645,10 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 		b = int(b*255)
 		if not scripts:
 			## static grease pencil
-			draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r,g,b,alpha))
+			if a['fill']:
+				draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r,g,b,alpha))
+			else:
+				draw.append('	draw_spline_wasm(&__%s__%s_%s,%s,%s, 0, 0,0,0,0);' % (dname, a['layer'], a['index'], a['length'], a['width']))
 		else:
 			tag = [oname, a['layer'], a['index']]
 			head.append('Vector2[%s] _%s_%s_%s;' % tuple([a['length']]+tag) )
@@ -1077,7 +1107,6 @@ function make_environment(e){
 }
 '''
 
-
 JS_LIB_API = '''
 function cstrlen(m,p){
 	var l=0;
@@ -1178,9 +1207,9 @@ c3dom_api = {
 	}
 	''',
 
-	'html_set_zindex':'''
-	html_set_zindex(idx,z){
-		this.elts[idx].style.zIndex = z
+	'html_css_zindex':'''
+	html_css_zindex(idx,z){
+		this.elts[idx].style.zIndex=z
 	}
 	''',
 
@@ -1290,7 +1319,7 @@ raylib_like_api = {
 		this.ctx.lineWidth=t;
 		this.ctx.beginPath();
 		this.ctx.moveTo(p[0], p[1]);
-		for (var i=2;i<p.length;i+=2)this.ctx.lineTo(p[i],p[i+1]);
+		for(var i=2;i<p.length;i+=2)this.ctx.lineTo(p[i],p[i+1]);
 		if(fill){
 			this.ctx.closePath();
 			this.ctx.fill()
@@ -1425,12 +1454,21 @@ def gen_js_api(world, c3, user_methods):
 			js.append(raylib_like_api[fname])
 
 	for fname in c3dom_api:
-		if fname+'(' in c3:
+		used = fname+'(' in c3
+		if fname in 'html_set_text html_add_char html_css_scale html_css_scale_y html_css_zindex'.split():
+			scall = 'self.%s(' % fname.split('html_')[-1]
+			if scall in c3: used = True
+			scall = '].%s(' % fname.split('html_')[-1]
+			if scall in c3: used = True
 
+		if used:
+			print('used:', fname)
 			if world.c3_miniapi:
 				js.append(c3dom_api_mini[fname]['code'])
 			else:
 				js.append(c3dom_api[fname])
+		else:
+			print('skipping:', fname)
 
 	for fname in user_methods:
 		fudge = fname.replace('(', '(_,')
@@ -1459,7 +1497,6 @@ def gen_js_api(world, c3, user_methods):
 			'color_hex_unpacked':'cu', 'getColorFromMemory':'gm', 
 			'cstr_by_ptr':'cp', 'cstrlen':'cl',
 			'this.canvas':'this.can',
-			'window.requestAnimationFrame':'_',
 		}
 		for rep in rmap:
 			if rep in js:
@@ -1491,11 +1528,9 @@ def gen_html(world, wasm, c3, user_html=None, background='', user_methods={}, de
 
 	if world.c3_invalid_html:
 		o = [
-			'<canvas id="$">',
-			'<script>', 
-			'_=requestAnimationFrame',
-			'$0="%s"' % jsb,
+			'<canvas id=$><script>',
 			'$1="%s"' % b,
+			'$0="%s"' % jsb,
 			#JS_DECOMP.replace('\t','').replace('var ', '').replace('\n',''), ## breaks invalid canvas above
 			JS_DECOMP.replace('\t','').replace('var ', ''), 
 			'</script>',
