@@ -66,6 +66,10 @@ if (raylib::get_random_value(0,100) < 10){
 }
 '''
 
+EXAMPLE3_INIT = '''
+self.css_string("transformOrigin", "left");
+'''
+
 def test2(quant=None, wasm_simple_stroke_opt=None):
 	cube = bpy.data.objects['Cube']
 	txt = bpy.data.texts.new(name='example1.c3')
@@ -89,6 +93,7 @@ def test2(quant=None, wasm_simple_stroke_opt=None):
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
+	ob.name='eyes'
 	ob.data.body = 'Oo'
 	ob.rotation_euler.x = math.pi/2
 	ob.location.x -= 0.73
@@ -97,6 +102,10 @@ def test2(quant=None, wasm_simple_stroke_opt=None):
 	txt = bpy.data.texts.new(name='example3.c3')
 	txt.from_string(EXAMPLE3)
 	ob.c3_script0 = txt
+
+	ti = bpy.data.texts.new(name='example3_init.c3')
+	ti.from_string(EXAMPLE3_INIT)
+	ob.c3_script_init = ti
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
