@@ -4,24 +4,50 @@ from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
 sys.path.append(_thisdir)
 
-BLENDER = 'blender'
-if sys.platform == 'win32': BLENDER = 'C:/Program Files/Blender Foundation/Blender 4.2/blender.exe'
-elif sys.platform == 'darwin': BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender'
-
-
 C3 = '/usr/local/bin/c3c'
+
+islinux=iswindows=c3gz=c3zip=None
+if sys.platform == 'win32':
+	BLENDER = 'C:/Program Files/Blender Foundation/Blender 4.2/blender.exe'
+	c3zip = 'https://github.com/c3lang/c3c/releases/download/latest/c3-windows.zip'
+	C3 = os.path.join(_thisdir,'c3/c3c.exe')
+	iswindows=True
+elif sys.platform == 'darwin':
+	BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender'
+	c3zip = 'https://github.com/c3lang/c3c/releases/download/latest/c3-macos.zip'
+else:
+	BLENDER = 'blender'
+	c3gz = 'https://github.com/c3lang/c3c/releases/download/latest/c3-ubuntu-20.tar.gz'
+	islinux=True
+
 if not os.path.isfile(C3):
 	C3 = '/opt/c3/c3c'
 	if not os.path.isfile(C3):
-		if not os.path.isdir('c3'):
-			if not os.path.isfile('c3-ubuntu-20.tar.gz'):
-				cmd = 'wget -c https://github.com/c3lang/c3c/releases/download/latest/c3-ubuntu-20.tar.gz'
+		if not os.path.isdir('./c3'):
+			if c3gz:
+				if not os.path.isfile('c3-ubuntu-20.tar.gz'):
+					cmd = 'wget -c %s' % c3gz
+					print(cmd)
+					subprocess.check_call(cmd.split())
+				cmd = 'tar -xvf c3-ubuntu-20.tar.gz'
 				print(cmd)
 				subprocess.check_call(cmd.split())
-			cmd = 'tar -xvf c3-ubuntu-20.tar.gz'
-			print(cmd)
-			subprocess.check_call(cmd.split())
-		C3 = os.path.abspath('./c3/c3c')
+			elif c3zip and iswindows:
+				if not os.path.isfile('c3-windows.zip'):
+					cmd = ['C:/Windows/System32/curl.exe', '-o', 'c3-windows.zip', c3zip]
+					print(cmd)
+					subprocess.check_call(cmd)
+			elif c3zip:
+				if not os.path.isfile('c3-macos.zip'):
+					cmd = ['curl', '-o', 'c3-macos.zip', c3zip]
+					print(cmd)
+					subprocess.check_call(cmd)
+
+		if islinux:
+			C3 = os.path.abspath('./c3/c3c')
+		elif iswindows:
+			C3 = os.path.abspath('./c3/c3c.exe')
+
 print('c3c:', C3)
 assert os.path.isfile(C3)
 
@@ -35,8 +61,12 @@ if "--install-wasm" in sys.argv and not os.path.isdir(EMSDK):
 	subprocess.check_call(cmd)
 	emsdk_update()
 
-EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc")
-WASM_OBJDUMP = os.path.join(EMSDK, "upstream/bin/llvm-objdump")
+if iswindows:
+	EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc.exe")
+	WASM_OBJDUMP = os.path.join(EMSDK, "upstream/bin/llvm-objdump.exe")
+else:
+	EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc")
+	WASM_OBJDUMP = os.path.join(EMSDK, "upstream/bin/llvm-objdump")
 if not EMCC and "--install-wasm" in sys.argv:
 	emsdk_update()
 
@@ -116,10 +146,13 @@ if __name__=='__main__':
 MAX_SCRIPTS_PER_OBJECT = 8
 MAX_OBJECTS_PER_TEXT = 4
 if not bpy:
-	if not os.path.isfile('/usr/bin/blender'):
-		print('did you install blender?')
-		print('snap install blender')
-	print('run: python3 c3blender.py --blender')
+	if islinux:
+		if not os.path.isfile('/usr/bin/blender'):
+			print('did you install blender?')
+			print('snap install blender')
+	else:
+		print('download blender from: https://blender.org')
+
 	sys.exit()
 
 HEADER = '''
