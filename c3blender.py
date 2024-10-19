@@ -263,14 +263,16 @@ def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
 WASM_EXTERN = '''
+extern fn void html_css_string (int id, char *ptr) @extern("html_css_string");
+extern fn void html_css_int (int id, int val) @extern("html_css_int");
+
+
 extern fn float random () @extern("random");
 
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn int html_new (char *ptr) @extern("html_new");
 extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
-
 extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
 extern fn void html_add_char (int id, char c) @extern("html_add_char");
 
@@ -321,6 +323,9 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			s = WASM_EXTERN
 			for fname in c3dom_api_mini:
 				key = '@extern("%s")' % fname
+				if key not in s:
+					print(s)
+					print(key)
 				assert key in s
 				s = s.replace(key, '@extern("%s")' % c3dom_api_mini[fname]['sym'])
 
@@ -516,7 +521,8 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			elif ob.location.y <= -0.1:
 				setup.append('	html_css_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
 
-			draw.append('	self = objects[%s];' % idx)
+			if scripts or (ob.parent and has_scripts(ob.parent)):
+				draw.append('	self = objects[%s];' % idx)
 
 			if scripts:
 				props = {}
@@ -1190,34 +1196,32 @@ class api{
 	}
 '''
 
-
 c3dom_api = {
-	'html_new' : '''
-	html_new(ptr){
-		var elt=document.createElement(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr));
-		elt.style.position='absolute';
-		this.elts.push(elt);
-		document.body.appendChild(elt);
-		return this.elts.length-1
+	'html_new_text' : '''
+	html_new_text(ptr,r,g,b,h,id){
+		var e=document.createElement('pre');
+		e.style='position:absolute;left:'+r+';top:'+g+';font-size:'+b;
+		e.hidden=h;
+		e.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,id);
+		document.body.appendChild(e);
+		e.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr));
+		return this.elts.push(e)-1
 	}
 	''',
 
-	'html_new_text' : '''
-	html_new_text(ptr,x,y,sz,viz,id){
-		var elt=document.createElement('pre');
-		elt.style.transformOrigin='left';
-		elt.style.position='absolute';
-		elt.style.left=x;
-		elt.style.top=y;
-		elt.style.fontSize=sz;
-		elt.hidden=viz;
-		elt.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,id);
-		this.elts.push(elt);
-		document.body.appendChild(elt);
-		elt.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr));
-		return this.elts.length-1
+	'html_css_string':'''
+	html_css_string(idx,a,b){
+		a=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,a);
+		this.elts[idx].style[a]=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,b)
 	}
 	''',
+	'html_css_int':'''
+	html_css_int(idx,a,b){
+		a=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,a);
+		this.elts[idx].style[a]=b
+	}
+	''',
+
 
 	'html_set_text':'''
 	html_set_text(idx,ptr){
@@ -1226,21 +1230,21 @@ c3dom_api = {
 	''',
 
 	'html_add_char':'''
-	html_add_char(idx, c){
+	html_add_char(idx,c){
 		this.elts[idx].append(String.fromCharCode(c))
 	}
 	''',
 
 
 	'html_css_scale':'''
-	html_css_scale(idx, sz){
-		this.elts[idx].style.transform='scale('+sz+')'
+	html_css_scale(idx,z){
+		this.elts[idx].style.transform='scale('+z+')'
 	}
 	''',
 
 	'html_css_scale_y':'''
-	html_css_scale_y(idx, sz){
-		this.elts[idx].style.transform='scaleY('+sz+')'
+	html_css_scale_y(idx,z){
+		this.elts[idx].style.transform='scaleY('+z+')'
 	}
 	''',
 
@@ -1440,14 +1444,17 @@ raylib_like_api_mini = {}
 c3dom_api_mini = {}
 def gen_mini_api():
 	syms = list(string.ascii_lowercase)
-	syms.remove('j')
+	#syms.remove('j')
+	#nxt = lambda : syms.pop()
 	for fname in raylib_like_api:
 		code = raylib_like_api[fname].strip()
 		if code.startswith(fname):
 			sym = syms.pop()
 			code = sym + code[len(fname):]
 			raylib_like_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
+			#raylib_like_api_mini[fname] = {'sym':nxt,'code':code.replace('\t','')}
 		else:
+			## hard coded syms
 			sym = code.split('(')[0]
 			raylib_like_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
 
@@ -1458,11 +1465,12 @@ def gen_mini_api():
 		sym = syms.pop()
 		code = sym + code[len(fname):]
 		c3dom_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
+		#c3dom_api_mini[fname] = {'sym':nxt,'code':code.replace('\t','')}
 
 gen_mini_api()
 
-
 def gen_js_api(world, c3, user_methods):
+
 	skip = []
 	if 'raylib::color_from_hsv' not in c3:
 		skip.append('ColorFromHSV')
