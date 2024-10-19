@@ -528,10 +528,18 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 						'}',
 					]
 				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
+
 			if ob.location.y >= 0.1:
 				setup.append('	html_css_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y*10)))
 			elif ob.location.y <= -0.1:
 				setup.append('	html_css_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
+
+			## slightly bigger than using html_css_zindex
+			#if ob.location.y >= 0.1:
+			#	setup.append('	html_css_int(objects[%s].id,"zIndex",-%s);' % (idx, int(ob.location.y*10)))
+			#elif ob.location.y <= -0.1:
+			#	setup.append('	html_css_int(objects[%s].id,"zIndex", %s);' % (idx, abs(int(ob.location.y*10))) )
+
 
 			if scripts or (ob.parent and has_scripts(ob.parent)):
 				draw.append('	self = objects[%s]; // %s' % (idx,ob.name))
@@ -1224,7 +1232,7 @@ c3dom_api = {
 		e.style='position:absolute;left:'+r+';top:'+g+';font-size:'+b;
 		e.hidden=h;
 		e.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,id);
-		document.body.appendChild(e);
+		document.body.append(e);
 		e.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr));
 		return this.elts.push(e)-1
 	}
@@ -1570,7 +1578,8 @@ def gen_js_api(world, c3, user_methods):
 			'const ': 'var ', 'entryFunction':'ef', 'make_environment':'me', 
 			'color_hex_unpacked':'cu', 'getColorFromMemory':'gm', 
 			'cstr_by_ptr':'cp', 'cstrlen':'cl',
-			'this.canvas':'this.can',
+			'this.canvas':'this._a',
+			'window.requestAnimationFrame':'self.requestAnimationFrame',
 		}
 		for rep in rmap:
 			if rep in js:
