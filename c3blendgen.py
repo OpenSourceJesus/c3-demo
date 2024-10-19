@@ -439,7 +439,7 @@ if (self.talking) {
 }
 '''
 
-def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
+def test9(quant=None, wasm_simple_stroke_opt=None):
 	cube = bpy.data.objects['Cube']
 	cube.hide_set(True)
 
@@ -492,3 +492,36 @@ def test9(quant=None, wasm_simple_stroke_opt=None, example=EXAMPLE4):
 	ob.data.extrude = 0.18
 	ob.parent = mo
 	txt.object1 = ob
+
+	return mo
+
+def test10(quant=None, wasm_simple_stroke_opt=None):
+	mob = test9(quant, wasm_simple_stroke_opt)
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.name='_'
+	ob.data.body = '🥼'
+	ob.data.size *= 1.25
+	ob.rotation_euler.x = math.pi/2
+	ob.location = [-0.7, 0.2, -1.6]
+	ob.parent = mob
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.name='_'
+	ob.data.body = '🩳'
+	ob.data.size *= 0.6
+	ob.rotation_euler.x = math.pi/2
+	ob.location = [-0.3, 0.3, -2.2]
+	ob.parent = mob
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.name='_'
+	ob.data.body = choice(['👞👞', '👟👟', '🥾🥾', '👢👢'])
+	ob.data.size *= 0.3
+	ob.rotation_euler.x = math.pi/2
+	ob.location = [-0.25, 0.4, -2.4]
+	ob.parent = mob
+
