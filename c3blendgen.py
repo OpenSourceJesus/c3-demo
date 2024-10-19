@@ -527,10 +527,55 @@ def test10(quant=None, wasm_simple_stroke_opt=None):
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
-	ob.name='_'
+	ob.name='_feet'
 	ob.data.body = choice(['👞👞', '👟👟', '🥾🥾', '👢👢'])
 	ob.data.size *= 0.3
 	ob.rotation_euler.x = math.pi/2
 	ob.location = [-0.25, 0.4, -2.4]
 	ob.parent = mob
 
+	return mob
+
+EXAMPLE11 = '''
+if (random() < 0.5){
+	self.css_string("letterSpacing", "-0.5em");
+} else {
+	self.css_string("letterSpacing", "0.1em");
+}
+'''
+
+def test11(quant=None, wasm_simple_stroke_opt=None):
+	mob = test10(quant, wasm_simple_stroke_opt)
+	ob = bpy.data.objects['_feet']
+	ob.name='f'
+	txt = bpy.data.texts.new(name='example11.c3')
+	txt.from_string(EXAMPLE11)
+	ob.c3_script0 = txt
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.name='_'
+	ob.data.body = '🤏'
+	ob.data.size *= 0.3
+	ob.rotation_euler.x = math.pi/2
+	ob.location = [-0.5, -0.3, -1.5]
+	ob.parent = mob
+
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.name='_'
+	ob.data.body = '🤙'
+	ob.data.size *= 0.3
+	ob.rotation_euler.x = math.pi/2
+	ob.location = [0.5, -0.2, -1.5]
+	ob.parent = mob
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.name='_'
+	ob.data.body = choice(['📋', '🧪', '💉', '🪥'])
+	ob.data.size *= 0.35
+	ob.rotation_euler.x = math.pi/2
+	ob.location = [0.55, -0.3, -1.5]
+	ob.parent = mob
