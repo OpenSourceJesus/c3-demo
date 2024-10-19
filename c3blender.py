@@ -225,6 +225,12 @@ fn void Object.css_scale_y(Object *obj, float scale) {
 fn void Object.css_zindex(Object *obj, int z) {
 	html_css_zindex (obj.id, z);
 }
+fn void Object.css_string(Object *obj, char *key, char *val) {
+	html_css_string (obj.id, key,val);
+}
+fn void Object.css_int(Object *obj, char *key, int val) {
+	html_css_int (obj.id, key,val);
+}
 
 '''
 
@@ -263,8 +269,8 @@ def safename(ob):
 	return ob.name.lower().replace('.', '_')
 
 WASM_EXTERN = '''
-extern fn void html_css_string (int id, char *ptr) @extern("html_css_string");
-extern fn void html_css_int (int id, int val) @extern("html_css_int");
+extern fn void html_css_string (int id, char *key, char *val) @extern("html_css_string");
+extern fn void html_css_int (int id, char *key, int val) @extern("html_css_int");
 
 
 extern fn float random () @extern("random");
@@ -425,7 +431,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
 			setup.append('	objects[%s].color={%s,%s,%s,0xFF};' % (idx, int(random()*255), int(random()*255), int(random()*255) ))
 
-			draw.append('	self = objects[%s];' % idx)
+			draw.append('	self = objects[%s]; //MESH<:%s' % (idx, ob.name) )
 			if scripts:
 				props = {}
 				for prop in ob.keys():
@@ -442,7 +448,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 							s = s.replace('self.'+prop, '%s_%s'%(prop,sname))
 					draw.append('\t' + s)
 				## save object state: from stack back to heap
-				draw.append('	objects[%s] = self;' % idx)
+				draw.append('	objects[%s] = self; //MESH>:%s' % (idx,ob.name))
 
 			if is_maybe_circle(ob):
 				if wasm:
@@ -498,6 +504,12 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				setup += [
 					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, fx,fy, cscale, hide, dom_name),
 				]
+			else:
+				fx = x+(cscale*0.1)
+				fy = z-(cscale*1.8)
+				setup += [
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, fx,fy, cscale, hide, dom_name),
+				]
 
 			if ob.c3_onclick:
 				tname = safename(ob.c3_onclick)
@@ -522,7 +534,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				setup.append('	html_css_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
 
 			if scripts or (ob.parent and has_scripts(ob.parent)):
-				draw.append('	self = objects[%s];' % idx)
+				draw.append('	self = objects[%s]; // %s' % (idx,ob.name))
 
 			if scripts:
 				props = {}
@@ -557,6 +569,15 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 					#'self.position.y=parent.position.y;',
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
 				]
+
+		if ob.type in ('MESH', 'GPENCIL', 'FONT'):
+			if not ob.name.startswith('_'):
+				if ob.c3_script_init:
+					setup += ['	{',
+						'	Object self=objects[%s_ID];' % sname.upper(),
+						ob.c3_script_init.as_string(),
+					'	}']
+
 
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
@@ -688,7 +709,7 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 					s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
 			draw.append('\t' + s)
 		## save object state: from stack back to heap
-		draw.append('	objects[%s] = self;' % obj_index)
+		draw.append('	objects[%s] = self; // %s' % (obj_index, ob.name))
 
 	for a in datas[dname]['draw']:
 		r,g,b,alpha = a['color']
@@ -1319,8 +1340,8 @@ c3dom_api = {
 
 raylib_like_api = {
 	'raylib_js_set_entry':'''
-	_(f) {
-		this.entryFunction = this.wasm.instance.exports.__indirect_function_table.get(f)
+	_(f){
+		this.entryFunction=this.wasm.instance.exports.__indirect_function_table.get(f)
 	}
 	''',
 
@@ -1328,8 +1349,7 @@ raylib_like_api = {
 	InitWindow(w,h,ptr){
 		this.canvas.width=w;
 		this.canvas.height=h;
-		const buf=this.wasm.instance.exports.memory.buffer;
-		document.title = cstr_by_ptr(buf,ptr)
+		document.title=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
 	}
 	''',
 	'GetScreenWidth':'''
@@ -1368,7 +1388,7 @@ raylib_like_api = {
 		if(fill)this.ctx.fillStyle='rgba('+r+','+g+','+b+','+a+')';
 		this.ctx.lineWidth=t;
 		this.ctx.beginPath();
-		this.ctx.moveTo(p[0], p[1]);
+		this.ctx.moveTo(p[0],p[1]);
 		for(var i=2;i<p.length;i+=2)this.ctx.lineTo(p[i],p[i+1]);
 		if(fill){
 			this.ctx.closePath();
@@ -1509,7 +1529,7 @@ def gen_js_api(world, c3, user_methods):
 
 	for fname in c3dom_api:
 		used = fname+'(' in c3
-		if fname in 'html_set_text html_add_char html_css_scale html_css_scale_y html_css_zindex'.split():
+		if fname in 'html_set_text html_add_char html_css_scale html_css_scale_y html_css_zindex html_css_string html_css_int'.split():
 			scall = 'self.%s(' % fname.split('html_')[-1]
 			if scall in c3: used = True
 			scall = '].%s(' % fname.split('html_')[-1]
