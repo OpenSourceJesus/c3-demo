@@ -361,8 +361,10 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 		z += offy
 		sx,sy,sz = ob.scale * SCALE
 		idx = len(meshes)
-		if not ob.name.startswith('_'):
-			head.append('short %s_id=%s;' % (sname,idx))
+		if ob.type in ('MESH', 'GPENCIL', 'FONT'):
+			if not ob.name.startswith('_'):
+				#head.append('short %s_id=%s;' % (sname,idx))
+				head.append('const short %s_ID=%s;' % (sname.upper(),idx))
 
 		scripts = []
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
@@ -423,14 +425,16 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				props = {}
 				for prop in ob.keys():
 					if prop.startswith( ('_', 'c3_') ): continue
-					head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
+					#head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
+					head.append('float %s_%s = %s;' %(prop,sname, ob[prop]))
 					props[prop] = ob[prop]
 
 				## user C3 scripts
 				for s in scripts:
 					for prop in props:
 						if 'self.'+prop in s:
-							s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
+							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
+							s = s.replace('self.'+prop, '%s_%s'%(prop,sname))
 					draw.append('\t' + s)
 				## save object state: from stack back to heap
 				draw.append('	objects[%s] = self;' % idx)
@@ -518,20 +522,29 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				props = {}
 				for prop in ob.keys():
 					if prop.startswith( ('_', 'c3_') ): continue
-					head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
+					#head.append('float %s_%s = %s;' %(sname, prop, ob[prop])) 
+					## Error: A letter must precede any digit `__001` (object copy in blender renames with .00N)
+					if ob[prop]==0:
+						head.append('float %s_%s;' %(prop,sname))
+					else:
+						head.append('float %s_%s = %s;' %(prop,sname, ob[prop]))
 					props[prop] = ob[prop]
 
 				## user C3 scripts
 				for s in scripts:
 					for prop in props:
 						if 'self.'+prop in s:
-							s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
+							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
+							s = s.replace('self.'+prop, '%s_%s'%(prop,sname))
 					draw.append('\t' + s)
 
 			if ob.parent and has_scripts(ob.parent):
 				if prevparent != ob.parent.name:
 					prevparent = ob.parent.name
-					draw.append('parent = objects[%s_id];' % safename(ob.parent))
+
+					#draw.append('parent = objects[%s_id];' % safename(ob.parent))
+					draw.append('parent = objects[%s_ID];' % safename(ob.parent).upper())
+
 				draw += [
 					#'parent = objects[%s_id];' % safename(ob.parent),
 					#'self.position.x=parent.position.x;',
@@ -1774,7 +1787,8 @@ def macro_pointers(txt):
 		if '$'+tag+'.' in t:
 			if not ob:
 				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
-			t = t.replace('$'+tag+'.', 'objects[%s_id].' % safename(ob))
+			#t = t.replace('$'+tag+'.', 'objects[%s_id].' % safename(ob))
+			t = t.replace('$'+tag+'.', 'objects[%s_ID].' % safename(ob).upper())
 		elif '$'+tag in t:
 			if not ob:
 				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
