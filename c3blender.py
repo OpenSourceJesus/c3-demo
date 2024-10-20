@@ -451,20 +451,22 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				## save object state: from stack back to heap
 				draw.append('	objects[%s] = self; //MESH>:%s' % (idx,ob.name))
 
-			if is_maybe_circle(ob):
-				rad = ob.data.vertices[0].co.y
-				if not rad:
-					for v in ob.data.vertices:
-						print(v.co)
-					print('WARN: not a circle? %s' % ob.name)
-					rad = 1.0
-				if wasm:
-					#draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x, self.color);')
-					draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x*%s, self.color);' % rad)
+			if ob.display_type in ('TEXTURED', 'SOLID'):
+				if is_maybe_circle(ob):
+					rad = ob.data.vertices[0].co.y
+					if not rad:
+						for v in ob.data.vertices:
+							print(v.co)
+						print('WARN: not a circle? %s' % ob.name)
+						rad = 1.0
+					if wasm:
+						#draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x, self.color);')
+						draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x*%s, self.color);' % rad)
+					else:
+						#draw.append('	raylib::draw_circle_v(self.position, self.scale.x, self.color);')
+						draw.append('	raylib::draw_circle_v(self.position, self.scale.x*%s, self.color);' % rad)
 				else:
-					draw.append('	raylib::draw_circle_v(self.position, self.scale.x, self.color);')
-			else:
-				draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
+					draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
 		elif ob.type=='GPENCIL':
 			meshes.append(ob)
 			if has_scripts(ob):
