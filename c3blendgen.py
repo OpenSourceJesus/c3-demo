@@ -626,34 +626,102 @@ def test12(quant=None, wasm_simple_stroke_opt=None):
 
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
-	ob.name='_'
-	ob.data.body='🏥🏢🛣️🏪🛤️'
+	ob.name='_city'
+	ob.data.body='🏥🏢🛣️🏪'
 	ob.data.size *= 3.5
 	ob.location.x = -2
 	ob.location.y = 0.5
 	ob.location.z = -1.5
 
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.name='_amb'
+	ob.data.body='🚑'
+	ob.data.size *= 3
+	ob.location.y = 0.4
+	ob.location.x = -0.5
+	ob.location.z = -1.8
+
 	bpy.ops.mesh.primitive_circle_add(fill_type="NGON", radius=0.1)
 	ob = bpy.context.active_object
+	ob.name = '_bricks_root'
 	ob.rotation_euler.x = math.pi / 2
 
 	txt = bpy.data.texts.new(name='bricks_anim.c3')
 	txt.from_string(EX12_BRICKS_ANIM)
 	ob.c3_script0 = txt
-
 	txt = bpy.data.texts.new(name='bricks.c3')
 	txt.from_string(EX12_BRICKS)
 	ob.c3_script1 = txt
-
 	ob['myprop'] = 1.0
-	parent = ob
+	return ob
 
-	bpy.ops.object.text_add()
-	ob = bpy.context.active_object
-	ob.name='amb'
-	ob.data.body='🚑'
-	ob.data.size *= 3
-	ob.location.y = 0.4
-	#ob.parent = parent
-	ob.location.x = -0.5
-	ob.location.z = -1.8
+
+BRICKS_CAVE = '''
+int n = 0;
+int rows = 0;
+Vector2 pos = {self.position.x,340};
+Vector2 scl = {30,15};
+Vector2 gscl = {2,5};
+
+// wasm-ld: error: /tmp/demo.o: undefined symbol: memset
+// note: cave_line can not be on the stack with --use-stdlib=no
+// Vector2[128] cave_line;
+// c3blender macro workaround for a bss zero alloc global array
+$Vector2[512] cave_line;
+
+$cave_line[0] = {0,460};
+$cave_line[511] = {1600,460};
+char[4] bclr = {200,20,20,0xFF};
+char[4] gclr = {10,200,20,0xFF};
+char prev=0;
+
+for (int i=0; i<wasm_size(); i++) {
+	char c = wasm_memory(i);
+
+	if (rows <= 6){
+		bclr[0] = c;
+		raylib::draw_rectangle_v(pos, scl, bclr);
+		pos.x += 32;
+	} else {
+		pos.x += c * 0.8f;
+	}
+	n ++;
+
+	raylib::draw_rectangle_v({pos.x,340-(prev*0.05f)}, gscl, gclr);
+
+	if (n==60){
+		if ( rows % 2){
+			pos.x = self.position.x;
+		} else {
+			pos.x = self.position.x+7;
+		}
+		pos.y += 17;
+		n = 0;
+		rows ++;
+	}
+	if (i < 510){
+		if (c < 32) {
+			$cave_line[i+1].x = (i*8.0f) + (self.position.x);
+			$cave_line[i+1].y = (c*1.8f)+500;
+
+		} else {
+			$cave_line[i+1].x = (i*8.0f) + (self.position.x);
+			$cave_line[i+1].y = (c*0.8f)+400;
+		}
+	}
+	prev = c;
+}
+
+draw_spline_wasm(&$cave_line, 512, 1.0, 1, 55,55,10, 1.0);
+
+'''
+
+def test13(quant=None, wasm_simple_stroke_opt=None):
+	ob = test12(quant, wasm_simple_stroke_opt)
+	bpy.data.worlds[0].c3_export_res_y = 1000
+
+	txt = bpy.data.texts.new(name='bricks_cave.c3')
+	txt.from_string(BRICKS_CAVE)
+	ob.c3_script1 = txt
+
