@@ -642,8 +642,10 @@ def test12(quant=None, wasm_simple_stroke_opt=None):
 	ob.location.x = -0.5
 	ob.location.z = -1.8
 
-	bpy.ops.mesh.primitive_circle_add(fill_type="NGON", radius=0.1)
+	#bpy.ops.mesh.primitive_circle_add(fill_type="NGON", radius=0.1)
+	bpy.ops.mesh.primitive_cube_add(size=0.1)
 	ob = bpy.context.active_object
+	ob.display_type='WIRE'  ## hides from html5 canvas
 	ob.name = '_bricks_root'
 	ob.rotation_euler.x = math.pi / 2
 
