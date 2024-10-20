@@ -561,7 +561,6 @@ def test11(quant=None, wasm_simple_stroke_opt=None):
 	ob.location = [-0.5, -0.3, -1.5]
 	ob.parent = mob
 
-
 	bpy.ops.object.text_add()
 	ob = bpy.context.active_object
 	ob.name='_'
@@ -579,3 +578,82 @@ def test11(quant=None, wasm_simple_stroke_opt=None):
 	ob.rotation_euler.x = math.pi/2
 	ob.location = [0.55, -0.3, -1.5]
 	ob.parent = mob
+
+	return mob
+
+
+EX12_BRICKS = '''
+int n = 0;
+int rows = 0;
+Vector2 pos = {self.position.x,340};
+Vector2 scl = {30,15};
+char[4] clr = {200,20,20,0xFF};
+for (int i=0; i<wasm_size(); i++) {
+	char c = wasm_memory(i);
+	clr[0] = c;
+
+	raylib::draw_rectangle_v(pos, scl, clr);
+	pos.x += 32;
+	n ++;
+
+	if (n==60){
+		if ( rows % 2){
+			pos.x = self.position.x;
+		} else {
+			pos.x = self.position.x+7;
+		}
+		pos.y += 17;
+		n = 0;
+		rows ++;
+	}
+	if (rows >= 6) {
+		break;
+	}
+}
+
+'''
+
+EX12_BRICKS_ANIM = '''
+self.position.x -= self.myprop;
+if (self.position.x <= -800) {
+	self.position.x = 0;
+}
+'''
+
+def test12(quant=None, wasm_simple_stroke_opt=None):
+	bpy.data.worlds[0].c3_export_res_x = 1300
+	mob = test11(quant, wasm_simple_stroke_opt)
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.name='_'
+	ob.data.body='🏥🏢🛣️🏪🛤️'
+	ob.data.size *= 3.5
+	ob.location.x = -2
+	ob.location.y = 0.5
+	ob.location.z = -1.5
+
+	bpy.ops.mesh.primitive_circle_add(fill_type="NGON", radius=0.1)
+	ob = bpy.context.active_object
+	ob.rotation_euler.x = math.pi / 2
+
+	txt = bpy.data.texts.new(name='bricks_anim.c3')
+	txt.from_string(EX12_BRICKS_ANIM)
+	ob.c3_script0 = txt
+
+	txt = bpy.data.texts.new(name='bricks.c3')
+	txt.from_string(EX12_BRICKS)
+	ob.c3_script1 = txt
+
+	ob['myprop'] = 1.0
+	parent = ob
+
+	bpy.ops.object.text_add()
+	ob = bpy.context.active_object
+	ob.name='amb'
+	ob.data.body='🚑'
+	ob.data.size *= 3
+	ob.location.y = 0.4
+	#ob.parent = parent
+	ob.location.x = -0.5
+	ob.location.z = -1.8
