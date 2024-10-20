@@ -358,6 +358,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 		draw.append('	raylib::begin_drawing();')
 		draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
 
+	global_v2arrays = {}
 	meshes = []
 	datas = {}
 	ascii_letters = list(string.ascii_uppercase)
@@ -381,7 +382,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			txt = getattr(ob, "c3_script" + str(i))
 			if txt:
-				scripts.append(macro_pointers(txt))
+				scripts.append(macro_pointers(txt, global_v2arrays))
 
 			txt = getattr(ob, "c3_method" + str(i))
 			if txt and txt.name not in methods:
@@ -419,7 +420,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 						raise SyntaxError('@extern names must be at least two characters: %s' % txt.c3_extern)
 					tname += '(' + txt.name.split('(')[-1]
 
-				methods[tname] = macro_pointers(txt)
+				methods[tname] = macro_pointers(txt, global_v2arrays)
 
 
 
@@ -529,14 +530,14 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 					head += [
 						'fn void _onclick_%s(int _index_) @extern("%s") {' % (tname,ascii_letters.pop()),
 						'	Object self = objects[_index_];',
-						macro_pointers(ob.c3_onclick),
+						macro_pointers(ob.c3_onclick, global_v2arrays),
 						'}',
 					]
 				else:
 					head += [
 						'fn void _onclick_%s(int _index_){' % tname,
 						'	Object self = objects[_index_];',
-						macro_pointers(ob.c3_onclick),
+						macro_pointers(ob.c3_onclick, global_v2arrays),
 						'}',
 					]
 				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
@@ -598,6 +599,9 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 						ob.c3_script_init.as_string(),
 					'	}']
 
+	if global_v2arrays:
+		for gname in global_v2arrays:
+			head.append(global_v2arrays[gname])
 
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
@@ -1828,7 +1832,7 @@ for i in range(MAX_OBJECTS_PER_TEXT):
 bpy.types.Text.c3_extern = bpy.props.StringProperty(name="fn extern")
 
 
-def macro_pointers(txt):
+def macro_pointers(txt, v2arrays={}):
 	t = txt.as_string()
 	for i in range(MAX_OBJECTS_PER_TEXT):
 		tag = 'object%s' % i
@@ -1848,7 +1852,20 @@ def macro_pointers(txt):
 		if '$'+tag in t:
 			t = t.replace('$'+tag, ','.join([str(v) for v in clr]))
 
-	return t
+	o = []
+	for ln in t.splitlines():
+		if ln.startswith('$Vector2'):
+			assert ln.startswith('$Vector2[')
+			assert '=' not in ln
+			name = ln.split(';')[0].strip().split()[-1]
+			v2arrays[name] = ln[1:].replace(name, '%s_%s' %(name, safename(txt)))
+		else:
+			for name in v2arrays:
+				if '$'+name in ln:
+					ln = ln.replace('$'+name, '%s_%s' % (name, safename(txt)))
+			o.append(ln)
+
+	return '\n'.join(o)
 
 @bpy.utils.register_class
 class C3ScriptsPanel(bpy.types.Panel):
