@@ -451,8 +451,15 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				draw.append('	objects[%s] = self; //MESH>:%s' % (idx,ob.name))
 
 			if is_maybe_circle(ob):
+				rad = ob.data.vertices[0].co.y
+				if not rad:
+					for v in ob.data.vertices:
+						print(v.co)
+					print('WARN: not a circle? %s' % ob.name)
+					rad = 1.0
 				if wasm:
-					draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x, self.color);')
+					#draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x, self.color);')
+					draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x*%s, self.color);' % rad)
 				else:
 					draw.append('	raylib::draw_circle_v(self.position, self.scale.x, self.color);')
 			else:
@@ -509,6 +516,11 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				fy = z-(cscale*1.8)
 				setup += [
 					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, fx,fy, cscale, hide, dom_name),
+				]
+
+			if ob.scale.y != 1.0:
+				setup += [
+					'	objects[%s].css_scale_y(%s);' % (idx, ob.scale.y),
 				]
 
 			if ob.c3_onclick:
