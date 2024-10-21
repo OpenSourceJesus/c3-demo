@@ -721,22 +721,63 @@ draw_spline_wasm(&$cave_line, 512, 1.0, 1, 55,55,10, 1.0);
 
 def test13(quant=None, wasm_simple_stroke_opt=None):
 	ob = test12(quant, wasm_simple_stroke_opt)
-	bpy.data.worlds[0].c3_export_res_y = 1000
+	bpy.data.worlds[0].c3_export_res_y = 900
 
 	txt = bpy.data.texts.new(name='bricks_cave.c3')
 	txt.from_string(BRICKS_CAVE)
 	ob.c3_script1 = txt
 	return ob
 
-BOT = '''
-fn void draw_bot(int x, int y){
-	char[4] botclr = {65,65,20, 0xFF};
-	raylib::draw_rectangle_v({x,y}, {32,32}, botclr);
-	raylib::draw_rectangle_v({(float)x+8,(float)y-10}, {16,16}, botclr);
+BOT_INIT = '''
+for (int i=0; i<16; i++){
+	bots[i].x = random() * 1000;
+	bots[i].y = 620;
 }
 '''
 
-BRICKS_CAVE_PIPES = '''
+BOT = '''
+struct Bot {
+	bool blinking;
+	int  mouth;
+	float x;
+	float y;
+}
+Bot[16] bots;
+
+fn void draw_bot(float x, float y, bool blink, int mouth){
+	char[4] botclr = {65,65,20, 0xFF};
+	char[4] white = {230,230,230,0xFF};
+	char[4] eye = {200,0,0,0xFF};
+
+	// body
+	raylib::draw_rectangle_v({x,y}, {32,32}, botclr);
+	raylib::draw_rectangle_v({(float)x+8,(float)y-10}, {16,16}, botclr);
+	raylib::draw_rectangle_v({(float)x+4,(float)y-6}, {23,6}, botclr);
+
+	// tail
+	raylib::draw_rectangle_v({(float)x-12,(float)y+9+(random()*2)}, {12,10}, botclr);
+
+	//mouth
+	raylib::draw_rectangle_v({(float)x+7,(float)y+9}, {16, (float)2+mouth }, white);
+
+	// eyes
+	if (blink) {
+		raylib::draw_rectangle_v({(float)x+6,(float)y-3}, {8,3}, white);
+		raylib::draw_rectangle_v({(float)x+18,(float)y-3}, {8,3}, white);
+		raylib::draw_rectangle_v({(float)x+6,(float)y-2}, {3,3}, eye);
+		raylib::draw_rectangle_v({(float)x+20,(float)y-2}, {3,3}, eye);		
+
+	} else {
+		raylib::draw_rectangle_v({(float)x+6,(float)y-6}, {8,8}, white);
+		raylib::draw_rectangle_v({(float)x+18,(float)y-6}, {8,8}, white);
+		raylib::draw_rectangle_v({(float)x+6,(float)y-2}, {3,3}, eye);
+		raylib::draw_rectangle_v({(float)x+20,(float)y-2}, {3,3}, eye);		
+	}
+
+}
+'''
+
+BRICKS_CAVE_BOTS = '''
 int n = 0;
 int rows = 0;
 Vector2 pos = {self.position.x,340};
@@ -745,19 +786,29 @@ Vector2 gscl = {2,5};
 $Vector2[512] cave_line;
 
 $cave_line[0] = {0,460};
-$cave_line[511] = {1600,460};
+$cave_line[511] = {1800,460};
 char[4] bclr = {200,20,20,0xFF};
 char[4] gclr = {10,200,20,0xFF};
 char[4] cclr = {55,55,10, 0xFF};
 char prev=0;
 
 // draw upper dirt
-raylib::draw_rectangle_v({0,340}, {1600,120}, cclr);
+raylib::draw_rectangle_v({0,340}, {1800,120}, cclr);
 // draw lower dirt
-raylib::draw_rectangle_v({0,640}, {1600,500}, cclr);
+raylib::draw_rectangle_v({0,640}, {1800,500}, cclr);
 
 // draw bots
-draw_bot(64, 620);
+for (int i=0; i<16; i++){
+
+	if (random() < 0.05){
+		if(bots[i].blinking){bots[i].blinking=false;}
+		else {bots[i].blinking=true;}
+	}
+	if (random() < 0.05){
+		bots[i].mouth = (int)(random()*8);
+	}
+	draw_bot(bots[i].x, bots[i].y+(random()*2), bots[i].blinking, bots[i].mouth);
+}
 
 for (int i=0; i<wasm_size(); i++) {
 	char c = wasm_memory(i);
@@ -822,7 +873,7 @@ draw_spline_wasm(&$cave_line, 512, 2.0, 1, 55,55,10, 1.0);
 
 // draw blue tint over everything
 for (int i=0; i<32; i++) {
-	raylib::draw_rectangle_v({0, (float)(350+(i*64)) }, {1600,600}, {0,0,255,16});
+	raylib::draw_rectangle_v({0, (float)(350+(i*64)) }, {1800,600}, {0,0,255,16});
 }
 
 
@@ -830,11 +881,16 @@ for (int i=0; i<32; i++) {
 
 def test14(quant=None, wasm_simple_stroke_opt=None):
 	ob = test13(quant, wasm_simple_stroke_opt)
+	bpy.data.worlds[0].c3_export_res_x = 1800
 
 	txt = bpy.data.texts.new(name='bricks_cave_pipes.c3')
-	txt.from_string(BRICKS_CAVE_PIPES)
+	txt.from_string(BRICKS_CAVE_BOTS)
 	ob.c3_script1 = txt
 
 	ftxt = bpy.data.texts.new(name='bot.c3')
 	ftxt.from_string(BOT)
-	txt.functions0 = ftxt
+	txt.c3_functions0 = ftxt
+
+	itxt = bpy.data.texts.new(name='bot_init.c3')
+	itxt.from_string(BOT_INIT)
+	ftxt.c3_init0 = itxt
