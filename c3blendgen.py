@@ -728,6 +728,13 @@ def test13(quant=None, wasm_simple_stroke_opt=None):
 	ob.c3_script1 = txt
 	return ob
 
+BOT = '''
+fn void draw_bot(int x, int y){
+	char[4] botclr = {65,65,20, 0xFF};
+	raylib::draw_rectangle_v({x,y}, {32,32}, botclr);
+	raylib::draw_rectangle_v({(float)x+8,(float)y-10}, {16,16}, botclr);
+}
+'''
 
 BRICKS_CAVE_PIPES = '''
 int n = 0;
@@ -744,8 +751,13 @@ char[4] gclr = {10,200,20,0xFF};
 char[4] cclr = {55,55,10, 0xFF};
 char prev=0;
 
+// draw upper dirt
 raylib::draw_rectangle_v({0,340}, {1600,120}, cclr);
+// draw lower dirt
+raylib::draw_rectangle_v({0,640}, {1600,500}, cclr);
 
+// draw bots
+draw_bot(64, 620);
 
 for (int i=0; i<wasm_size(); i++) {
 	char c = wasm_memory(i);
@@ -770,7 +782,9 @@ for (int i=0; i<wasm_size(); i++) {
 			}
 		}
 		if (c >= 1){
+			// draw bricks
 			raylib::draw_rectangle_v(pos, scl, bclr);
+			raylib::draw_rectangle_v({pos.x-128, pos.y+298}, scl, bclr);
 		}
 		pos.x += 32;
 	} else {
@@ -803,7 +817,14 @@ for (int i=0; i<wasm_size(); i++) {
 	prev = c;
 }
 
-draw_spline_wasm(&$cave_line, 512, 1.0, 1, 55,55,10, 1.0);
+// draw cave line
+draw_spline_wasm(&$cave_line, 512, 2.0, 1, 55,55,10, 1.0);
+
+// draw blue tint over everything
+for (int i=0; i<32; i++) {
+	raylib::draw_rectangle_v({0, (float)(350+(i*64)) }, {1600,600}, {0,0,255,16});
+}
+
 
 '''
 
@@ -813,3 +834,7 @@ def test14(quant=None, wasm_simple_stroke_opt=None):
 	txt = bpy.data.texts.new(name='bricks_cave_pipes.c3')
 	txt.from_string(BRICKS_CAVE_PIPES)
 	ob.c3_script1 = txt
+
+	ftxt = bpy.data.texts.new(name='bot.c3')
+	ftxt.from_string(BOT)
+	txt.functions0 = ftxt
