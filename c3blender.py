@@ -345,15 +345,21 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 
 		head.append(WASM_HELPERS)
 
+	setup = ['fn void main() @extern("main") @wasm {']
+
 	global_funcs = {}
+	main_init = {}
 	for txt in bpy.data.texts:
 		for i in range(MAX_OBJECTS_PER_TEXT):
-			ftxt = getattr(txt, 'functions%s' % i)
+			ftxt = getattr(txt, 'c3_functions%s' % i)
 			if ftxt and ftxt.name not in global_funcs:
 				global_funcs[ftxt.name]=ftxt
 				head.append(ftxt.as_string())
+			itxt = getattr(txt, 'c3_init%s' % i)
+			if itxt and itxt.name not in main_init:
+				main_init[itxt.name]=itxt
+				setup.append(itxt.as_string())
 
-	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
 		'fn void game_frame() @extern("$") @wasm {',
 		'	Object self;',
@@ -1840,8 +1846,13 @@ for i in range(MAX_OBJECTS_PER_TEXT):
 	)
 	setattr(
 		bpy.types.Text,
-		"functions" + str(i),
-		bpy.props.PointerProperty(name="functions%s" % i, type=bpy.types.Text),
+		"c3_functions" + str(i),
+		bpy.props.PointerProperty(name="function script%s" % i, type=bpy.types.Text),
+	)
+	setattr(
+		bpy.types.Text,
+		"c3_init" + str(i),
+		bpy.props.PointerProperty(name="init script%s" % i, type=bpy.types.Text),
 	)
 
 bpy.types.Text.c3_extern = bpy.props.StringProperty(name="fn extern")
@@ -1909,7 +1920,11 @@ class C3ScriptsPanel(bpy.types.Panel):
 
 		self.layout.label(text="include functions")
 		for i in range(MAX_OBJECTS_PER_TEXT):
-			self.layout.prop(txt, 'functions%s' % i)
+			self.layout.prop(txt, 'c3_functions%s' % i)
+
+		self.layout.label(text="initialize scripts")
+		for i in range(MAX_OBJECTS_PER_TEXT):
+			self.layout.prop(txt, 'c3_init%s' % i)
 
 
 @bpy.utils.register_class
