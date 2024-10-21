@@ -744,7 +744,7 @@ struct Bot {
 }
 Bot[16] bots;
 
-fn void draw_bot(float x, float y, bool blink, int mouth){
+fn void Bot.draw(Bot *self, float x, float y, bool blink, int mouth){
 	char[4] botclr = {65,65,20, 0xFF};
 	char[4] white = {230,230,230,0xFF};
 	char[4] eye = {200,0,0,0xFF};
@@ -777,7 +777,10 @@ fn void draw_bot(float x, float y, bool blink, int mouth){
 }
 '''
 
-BRICKS_CAVE_BOTS = '''
+
+BOTS_DEMO = {
+	'draw':{
+		'init':'''
 int n = 0;
 int rows = 0;
 Vector2 pos = {self.position.x,340};
@@ -791,12 +794,14 @@ char[4] bclr = {200,20,20,0xFF};
 char[4] gclr = {10,200,20,0xFF};
 char[4] cclr = {55,55,10, 0xFF};
 char prev=0;
-
+		''',
+		'dirt':'''
 // draw upper dirt
 raylib::draw_rectangle_v({0,340}, {1800,120}, cclr);
 // draw lower dirt
 raylib::draw_rectangle_v({0,640}, {1800,500}, cclr);
-
+		''',
+		'bots':'''
 // draw bots
 for (int i=0; i<16; i++){
 
@@ -807,9 +812,10 @@ for (int i=0; i<16; i++){
 	if (random() < 0.05){
 		bots[i].mouth = (int)(random()*8);
 	}
-	draw_bot(bots[i].x, bots[i].y+(random()*2), bots[i].blinking, bots[i].mouth);
+	bots[i].draw(bots[i].x, bots[i].y+(random()*2), bots[i].blinking, bots[i].mouth);
 }
-
+		''',
+		'bricks':'''
 for (int i=0; i<wasm_size(); i++) {
 	char c = wasm_memory(i);
 
@@ -868,24 +874,35 @@ for (int i=0; i<wasm_size(); i++) {
 	prev = c;
 }
 
+		''',
+
+		'cave':'''
 // draw cave line
 draw_spline_wasm(&$cave_line, 512, 2.0, 1, 55,55,10, 1.0);
+		''',
 
+		'bluetint':'''
 // draw blue tint over everything
 for (int i=0; i<32; i++) {
 	raylib::draw_rectangle_v({0, (float)(350+(i*64)) }, {1800,600}, {0,0,255,16});
 }
+		'''
+	}
 
+}
 
-'''
 
 def test14(quant=None, wasm_simple_stroke_opt=None):
 	ob = test13(quant, wasm_simple_stroke_opt)
 	bpy.data.worlds[0].c3_export_res_x = 1800
 
-	txt = bpy.data.texts.new(name='bricks_cave_pipes.c3')
-	txt.from_string(BRICKS_CAVE_BOTS)
-	ob.c3_script1 = txt
+	for idx, tag in enumerate(BOTS_DEMO['draw']):
+		txt = bpy.data.texts.new(name=tag)
+		txt.from_string(BOTS_DEMO['draw'][tag])
+		if tag =='init':
+			setattr(ob, 'c3_script%s' %(idx+1), txt)
+		else:
+			setattr(ob, 'c3_script%s' %(idx+2), txt)
 
 	ftxt = bpy.data.texts.new(name='bot.c3')
 	ftxt.from_string(BOT)
@@ -894,3 +911,33 @@ def test14(quant=None, wasm_simple_stroke_opt=None):
 	itxt = bpy.data.texts.new(name='bot_init.c3')
 	itxt.from_string(BOT_INIT)
 	ftxt.c3_init0 = itxt
+
+	return ob
+
+DRAW_PIPES = '''
+for (int i=0; i<32; i+=3) {
+	char a = wasm_memory(i);
+	char b = wasm_memory(i+1);
+	char c = wasm_memory(i+2);
+	float x = (float)( (i*150)+(c*2)) +self.position.x;
+	float y = 200 + (float)(c*1.5);
+
+	raylib::draw_rectangle_v({x-12, 250}, {104,30}, {0,0,0,0xFF});
+	raylib::draw_rectangle_v({x-2, 280}, {84,y+2}, {0,0,0,0xFF});
+
+	raylib::draw_rectangle_v({x, 280}, {80,y}, {a,200,b,0xFF});
+
+	raylib::draw_rectangle_v({x-10, 252}, {100,25}, {a,230,b,0xFF});
+	raylib::draw_rectangle_v({x-6, 254}, {80,20}, {a,250,b,0xFF});
+
+	raylib::draw_rectangle_v({x+6, 280}, {32,y}, {a,230,b,0xFF});
+
+}
+
+'''
+
+def test15(quant=None, wasm_simple_stroke_opt=None):
+	ob = test14(quant, wasm_simple_stroke_opt)
+	txt = bpy.data.texts.new(name='bot.c3')
+	txt.from_string(DRAW_PIPES)
+	ob.c3_script2 = txt  ## draws before dirt
