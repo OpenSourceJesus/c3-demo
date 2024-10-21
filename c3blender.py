@@ -304,7 +304,7 @@ def get_scripts(ob):
 	scripts = []
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
 		txt = getattr(ob, "c3_script" + str(i))
-		if txt: scripts.append(macro_pointers(txt))
+		if txt: scripts.append(macro_pointers(txt,ob))
 	return scripts
 
 def has_scripts(ob):
@@ -396,7 +396,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			txt = getattr(ob, "c3_script" + str(i))
 			if txt:
-				scripts.append(macro_pointers(txt, global_v2arrays))
+				scripts.append(macro_pointers(txt, ob, global_v2arrays))
 
 			txt = getattr(ob, "c3_method" + str(i))
 			if txt and txt.name not in methods:
@@ -434,7 +434,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 						raise SyntaxError('@extern names must be at least two characters: %s' % txt.c3_extern)
 					tname += '(' + txt.name.split('(')[-1]
 
-				methods[tname] = macro_pointers(txt, global_v2arrays)
+				methods[tname] = macro_pointers(txt, ob, global_v2arrays)
 
 
 
@@ -546,14 +546,14 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 					head += [
 						'fn void _onclick_%s(int _index_) @extern("%s") {' % (tname,ascii_letters.pop()),
 						'	Object self = objects[_index_];',
-						macro_pointers(ob.c3_onclick, global_v2arrays),
+						macro_pointers(ob.c3_onclick, ob, global_v2arrays),
 						'}',
 					]
 				else:
 					head += [
 						'fn void _onclick_%s(int _index_){' % tname,
 						'	Object self = objects[_index_];',
-						macro_pointers(ob.c3_onclick, global_v2arrays),
+						macro_pointers(ob.c3_onclick, ob, global_v2arrays),
 						'}',
 					]
 				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
@@ -1858,7 +1858,7 @@ for i in range(MAX_OBJECTS_PER_TEXT):
 bpy.types.Text.c3_extern = bpy.props.StringProperty(name="fn extern")
 
 
-def macro_pointers(txt, v2arrays={}):
+def macro_pointers(txt, object=None, v2arrays={}):
 	t = txt.as_string()
 	for i in range(MAX_OBJECTS_PER_TEXT):
 		tag = 'object%s' % i
@@ -1884,11 +1884,11 @@ def macro_pointers(txt, v2arrays={}):
 			assert ln.startswith('$Vector2[')
 			assert '=' not in ln
 			name = ln.split(';')[0].strip().split()[-1]
-			v2arrays[name] = ln[1:].replace(name, '%s_%s' %(name, safename(txt)))
+			v2arrays[name] = ln[1:].replace(name, '%s_%s' %(name, safename(object)))
 		else:
 			for name in v2arrays:
 				if '$'+name in ln:
-					ln = ln.replace('$'+name, '%s_%s' % (name, safename(txt)))
+					ln = ln.replace('$'+name, '%s_%s' % (name, safename(object)))
 			o.append(ln)
 
 	return '\n'.join(o)
