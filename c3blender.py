@@ -345,6 +345,14 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 
 		head.append(WASM_HELPERS)
 
+	global_funcs = {}
+	for txt in bpy.data.texts:
+		for i in range(MAX_OBJECTS_PER_TEXT):
+			ftxt = getattr(txt, 'functions%s' % i)
+			if ftxt and ftxt.name not in global_funcs:
+				global_funcs[ftxt.name]=ftxt
+				head.append(ftxt.as_string())
+
 	setup = ['fn void main() @extern("main") @wasm {']
 	draw  = [
 		'fn void game_frame() @extern("$") @wasm {',
@@ -1830,6 +1838,11 @@ for i in range(MAX_OBJECTS_PER_TEXT):
 		"color" + str(i),
 		bpy.props.FloatVectorProperty(name="color%s" % i, subtype='COLOR'),
 	)
+	setattr(
+		bpy.types.Text,
+		"functions" + str(i),
+		bpy.props.PointerProperty(name="functions%s" % i, type=bpy.types.Text),
+	)
 
 bpy.types.Text.c3_extern = bpy.props.StringProperty(name="fn extern")
 
@@ -1893,6 +1906,10 @@ class C3ScriptsPanel(bpy.types.Panel):
 		self.layout.label(text="color pointers")
 		for i in range(MAX_OBJECTS_PER_TEXT):
 			self.layout.prop(txt, 'color%s' % i)
+
+		self.layout.label(text="include functions")
+		for i in range(MAX_OBJECTS_PER_TEXT):
+			self.layout.prop(txt, 'functions%s' % i)
 
 
 @bpy.utils.register_class
