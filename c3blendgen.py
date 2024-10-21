@@ -726,4 +726,90 @@ def test13(quant=None, wasm_simple_stroke_opt=None):
 	txt = bpy.data.texts.new(name='bricks_cave.c3')
 	txt.from_string(BRICKS_CAVE)
 	ob.c3_script1 = txt
+	return ob
 
+
+BRICKS_CAVE_PIPES = '''
+int n = 0;
+int rows = 0;
+Vector2 pos = {self.position.x,340};
+Vector2 scl = {30,15};
+Vector2 gscl = {2,5};
+$Vector2[512] cave_line;
+
+$cave_line[0] = {0,460};
+$cave_line[511] = {1600,460};
+char[4] bclr = {200,20,20,0xFF};
+char[4] gclr = {10,200,20,0xFF};
+char[4] cclr = {55,55,10, 0xFF};
+char prev=0;
+
+raylib::draw_rectangle_v({0,340}, {1600,120}, cclr);
+
+
+for (int i=0; i<wasm_size(); i++) {
+	char c = wasm_memory(i);
+
+	if (rows <= 6){
+		char[4] grout = {220,220,220,0xFF};
+		if (rows <= 5) {
+			if (rows > 3) {
+				grout = {180,180,180,0xFF};
+			}
+			if (c > 128){
+				raylib::draw_rectangle_v({pos.x-1, pos.y-2}, {30,17}, grout);
+			} else if (c > 64) {
+				raylib::draw_rectangle_v({pos.x+1, pos.y-2}, {80,17}, grout);			
+			}
+		}
+		if (c > 32 && c < 200){
+			if (c < 128) {
+				bclr[0] = c + 100;
+			} else {
+				bclr[0] = c;
+			}
+		}
+		if (c >= 1){
+			raylib::draw_rectangle_v(pos, scl, bclr);
+		}
+		pos.x += 32;
+	} else {
+		pos.x += c * 0.8f;
+	}
+	n ++;
+
+	raylib::draw_rectangle_v({pos.x,340-(prev*0.05f)}, gscl, gclr);
+
+	if (n==60){
+		if ( rows % 2){
+			pos.x = self.position.x;
+		} else {
+			pos.x = self.position.x+7;
+		}
+		pos.y += 17;
+		n = 0;
+		rows ++;
+	}
+	if (i < 510){
+		if (c < 32) {
+			$cave_line[i+1].x = (i*8.0f) + (self.position.x);
+			$cave_line[i+1].y = (c*1.8f)+500;
+
+		} else {
+			$cave_line[i+1].x = (i*8.0f) + (self.position.x);
+			$cave_line[i+1].y = (c*0.8f)+400;
+		}
+	}
+	prev = c;
+}
+
+draw_spline_wasm(&$cave_line, 512, 1.0, 1, 55,55,10, 1.0);
+
+'''
+
+def test14(quant=None, wasm_simple_stroke_opt=None):
+	ob = test13(quant, wasm_simple_stroke_opt)
+
+	txt = bpy.data.texts.new(name='bricks_cave_pipes.c3')
+	txt.from_string(BRICKS_CAVE_PIPES)
+	ob.c3_script1 = txt
