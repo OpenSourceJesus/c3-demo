@@ -941,3 +941,7 @@ def test15(quant=None, wasm_simple_stroke_opt=None):
 	txt = bpy.data.texts.new(name='bot.c3')
 	txt.from_string(DRAW_PIPES)
 	ob.c3_script2 = txt  ## draws before dirt
+
+	## uncomment below to disable bluetint
+	#assert ob.c3_script7.name=='bluetint'
+	#ob.c3_script7_disable = True
