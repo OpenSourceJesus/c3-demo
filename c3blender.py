@@ -129,7 +129,7 @@ if __name__=='__main__':
 			if arg.endswith('.blend'):
 				cmd.append(arg)
 				break
-		cmd +=['--python', __file__]
+		cmd +=['--python-exit-code', '1', '--python', __file__]
 		exargs = []
 		for arg in sys.argv:
 			if arg.startswith('--'):
@@ -303,6 +303,7 @@ extern fn int wasm_size () @extern("wasm_size");
 def get_scripts(ob):
 	scripts = []
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
+		if getattr(ob, "c3_script%s_disable" %i): continue
 		txt = getattr(ob, "c3_script" + str(i))
 		if txt: scripts.append(macro_pointers(txt,ob))
 	return scripts
@@ -396,7 +397,8 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			txt = getattr(ob, "c3_script" + str(i))
 			if txt:
-				scripts.append(macro_pointers(txt, ob, global_v2arrays))
+				if not getattr(ob, "c3_script%s_disable" %i):
+					scripts.append(macro_pointers(txt, ob, global_v2arrays))
 
 			txt = getattr(ob, "c3_method" + str(i))
 			if txt and txt.name not in methods:
@@ -1832,6 +1834,11 @@ for i in range(MAX_SCRIPTS_PER_OBJECT):
 		"c3_method" + str(i),
 		bpy.props.PointerProperty(name="method%s" % i, type=bpy.types.Text),
 	)
+	setattr(
+		bpy.types.Object,
+		"c3_script%s_disable" %i,
+		bpy.props.BoolProperty(name="disable"),
+	)
 
 for i in range(MAX_OBJECTS_PER_TEXT):
 	setattr(
@@ -1953,7 +1960,9 @@ class C3ObjectPanel(bpy.types.Panel):
 				getattr(ob, "c3_script" + str(i)) != None
 			)
 			if hasProperty or not foundUnassignedScript:
-				self.layout.prop(ob, "c3_script" + str(i))
+				row = self.layout.row()
+				row.prop(ob, "c3_script" + str(i))
+				row.prop(ob, "c3_script%s_disable"%i)
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 
