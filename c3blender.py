@@ -5,6 +5,7 @@ _thisdir = os.path.split(os.path.abspath(__file__))[0]
 sys.path.append(_thisdir)
 
 C3 = '/usr/local/bin/c3c'
+C3_STRIP_TAIL = True
 
 islinux=iswindows=c3gz=c3zip=None
 if sys.platform == 'win32':
@@ -70,6 +71,16 @@ else:
 if not EMCC and "--install-wasm" in sys.argv:
 	emsdk_update()
 
+def c3_wasm_strip(wasm):
+	#a = b'.rodata\x00,\x0ftarget_features\x02+\x0fmutable-globals+\x08sign-ext' # wasm-opt: parse exception: Section extends beyond end of input
+	a = b'\x00,\x0ftarget_features\x02+\x0fmutable-globals+\x08sign-ext'
+	b = open(wasm,'rb').read()
+	print(b)
+	assert b.endswith(a)
+	c = b[:-len(a)]
+	print(c)
+	open(wasm,'wb').write(c)
+
 
 def build(input='./demo.c3', output='demo', wasm='--wasm' in sys.argv, opt='--opt' in sys.argv, run=True, raylib='./raylib.c3'):
 	cmd = [C3]
@@ -105,7 +116,10 @@ def build(input='./demo.c3', output='demo', wasm='--wasm' in sys.argv, opt='--op
 	print(ofiles)
 	if run and not wasm: subprocess.check_call(['/tmp/'+output])
 	if wasm:
-		return '/tmp/%s.wasm' % output
+		w = '/tmp/%s.wasm' % output
+		if C3_STRIP_TAIL:
+			c3_wasm_strip(w)
+		return w
 	else:
 		return '/tmp/%s' % output
 
@@ -361,11 +375,16 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				main_init[itxt.name]=itxt
 				setup.append(itxt.as_string())
 
-	draw  = [
+	draw_header = [
 		'fn void game_frame() @extern("$") @wasm {',
-		'	Object self;',
-		'	Object parent;',
-		'	float dt = raylib::get_frame_time();',
+
+	]
+
+	draw  = [
+		#'fn void game_frame() @extern("$") @wasm {',
+		#'	Object self;',
+		#'	Object parent;',
+		#'	float delta_time = raylib::get_frame_time();',
 	]
 	if wasm:
 		draw.append('	html_canvas_clear();')
@@ -627,8 +646,19 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 		setup.append(MAIN % (resx, resy))
 
 	setup.append('}')
+
+
+	if 'self' in '\n'.join(draw):
+		draw_header.append('	Object self;')
+	if 'parent' in '\n'.join(draw):
+		draw_header.append('	Object parent;')
+	if 'delta_time' in '\n'.join(draw):
+		draw_header.append('	float delta_time = raylib::get_frame_time();')
+
+
 	if not wasm:
 		draw.append('	raylib::end_drawing();')
+
 	draw.append('}')
 
 	head.append('Object[%s] objects;' % len(meshes))
@@ -641,7 +671,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 		print(dname)
 		print('orig-points:', datas[dname]['orig-points'])
 		print('total-points:',datas[dname]['total-points'])
-	return head + setup + draw
+	return head + setup + draw_header + draw
 
 def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 	SCALE = WORLD.c3_export_scale
@@ -1706,6 +1736,14 @@ def gen_html(world, wasm, c3, user_html=None, background='', user_methods={}, de
 
 	return '\n'.join(o)
 
+
+def wasm_opt(wasm):
+	o = wasm.replace('.wasm', '.opt.wasm')
+	cmd = ['wasm-opt', '-o',o, '-Oz', wasm]
+	print(cmd)
+	subprocess.check_call(cmd)
+	return o
+
 SERVER_PROC = None
 WORLD = None
 def build_wasm( world ):
@@ -1730,6 +1768,7 @@ def build_wasm( world ):
 	else:
 		wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt)
 
+	wasm = wasm_opt(wasm)
 
 	_BUILD_INFO['wasm']=wasm
 	_BUILD_INFO['wasm-size']=len(open(wasm,'rb').read())
