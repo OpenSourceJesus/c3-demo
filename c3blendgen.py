@@ -2,15 +2,15 @@ import sys, bpy, math, mathutils
 from random import random, uniform, choice
 
 EXAMPLE1 = '''
-self.velocity += GRAVITY*dt;
-float nx = self.position.x + self.velocity.x*dt;
+self.velocity += GRAVITY*delta_time;
+float nx = self.position.x + self.velocity.x*delta_time;
 if (nx < 0 || nx + self.scale.x > raylib::get_screen_width()) {
 	self.velocity.x *= -COLLISION_DAMP;
 	self.color = {(char)raylib::get_random_value(0, 255), (char)raylib::get_random_value(0, 255), (char)raylib::get_random_value(0, 255), 0xFF};
 } else {
 	self.position.x = nx;
 }
-float ny = self.position.y + self.velocity.y*dt;
+float ny = self.position.y + self.velocity.y*delta_time;
 if (ny < 0 || ny + self.scale.y > raylib::get_screen_height()) {
 	self.velocity.y *= -COLLISION_DAMP;
 	self.color = {(char)raylib::get_random_value(0, 255), (char)raylib::get_random_value(0, 255), (char)raylib::get_random_value(0, 255), 0xFF};
@@ -945,3 +945,9 @@ def test15(quant=None, wasm_simple_stroke_opt=None):
 	## uncomment below to disable bluetint
 	#assert ob.c3_script7.name=='bluetint'
 	#ob.c3_script7_disable = True
+
+def monkey(quant=None, wasm_simple_stroke_opt=None):
+	cube = bpy.data.objects['Cube']
+	cube.hide_set(True)
+	bpy.ops.object.gpencil_add(type='MONKEY')
+	ob = bpy.context.active_object
