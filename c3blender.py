@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import os, sys, subprocess, atexit, webbrowser, math, base64, string
+import os, sys, subprocess, atexit, webbrowser, base64, string
 from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
 sys.path.append(_thisdir)
@@ -60,16 +60,15 @@ if "--install-wasm" in sys.argv and not os.path.isdir(EMSDK):
 	]
 	print(cmd)
 	subprocess.check_call(cmd)
-	emsdk_update()
 
 if iswindows:
 	EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc.exe")
 	WASM_OBJDUMP = os.path.join(EMSDK, "upstream/bin/llvm-objdump.exe")
 else:
-	EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc")
-	WASM_OBJDUMP = os.path.join(EMSDK, "upstream/bin/llvm-objdump")
-if not EMCC and "--install-wasm" in sys.argv:
-	emsdk_update()
+	# EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc")
+	EMCC = 'wasm-ld'
+	# WASM_OBJDUMP = os.path.join(EMSDK, "upstream/bin/llvm-objdump")
+	WASM_OBJDUMP = ''
 
 def c3_wasm_strip(wasm):
 	#a = b'.rodata\x00,\x0ftarget_features\x02+\x0fmutable-globals+\x08sign-ext' # wasm-opt: parse exception: Section extends beyond end of input
@@ -328,7 +327,6 @@ def has_scripts(ob):
 		if txt: return True
 	return False
 
-
 def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 	resx = world.c3_export_res_x
 	resy = world.c3_export_res_y
@@ -465,7 +463,8 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
 			#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
-			setup.append('	objects[%s].color={%s,%s,%s,0xFF};' % (idx, int(random()*255), int(random()*255), int(random()*255) ))
+			materialColor = ob.material_slots[0].material.diffuse_color
+			setup.append('	objects[%s].color={%s,%s,%s,0xFF};' % (idx, int(materialColor[0] * 255), int(materialColor[1] * 255), int(materialColor[2] * 255) ))
 
 			draw.append('	self = objects[%s]; //MESH<:%s' % (idx, ob.name) )
 			if scripts:
@@ -502,7 +501,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 						draw.append('	raylib::draw_circle_v(self.position, self.scale.x*%s, self.color);' % rad)
 				else:
 					draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
-		elif ob.type=='GPENCIL':
+		elif ob.type=='GREASEPENCIL':
 			meshes.append(ob)
 			if has_scripts(ob):
 				setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
@@ -674,6 +673,7 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 	return head + setup + draw_header + draw
 
 def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
+	print('YAY1')
 	SCALE = WORLD.c3_export_scale
 	offx = WORLD.c3_export_offset_x
 	offy = WORLD.c3_export_offset_y
@@ -691,7 +691,7 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 		datas[dname]={'orig-points':0, 'total-points':0, 'draw':[]}
 		data = []
 		for lidx, layer in enumerate( ob.data.layers ):
-			for sidx, stroke in enumerate( layer.frames[0].strokes ):
+			for sidx, stroke in enumerate( layer.frames[0].drawing.strokes ):
 				datas[dname]['orig-points'] += len(stroke.points)
 				mat = ob.data.materials[stroke.material_index]
 				use_fill = 0
@@ -712,7 +712,7 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 						print('stroke quantized away:', stroke)
 						continue
 					datas[dname]['total-points'] += len(qstroke['points'])
-					x0,y0,z0 = points[0].co
+					x0,y0,z0 = points[0].position
 					q = qstroke['q']
 					qs = qstroke['qs']
 					setup += [
@@ -736,11 +736,11 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 					s = []
 					if scripts:
 						for pnt in points:
-							x1,y1,z1 = pnt.co * SCALE
+							x1,y1,z1 = pnt.position * SCALE
 							s.append('{%s,%s}' % (x1,-z1))
 					else:
 						for pnt in points:
-							x1,y1,z1 = pnt.co
+							x1,y1,z1 = pnt.position
 							x1 *= sx
 							z1 *= sz
 							s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
@@ -855,6 +855,7 @@ def gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
 
 
 def grease_to_c3_raylib(ob, datas, head, draw, setup):
+	print('YAY2')
 	SCALE = WORLD.c3_export_scale
 	offx = WORLD.c3_export_offset_x
 	offy = WORLD.c3_export_offset_y
@@ -870,7 +871,7 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 		datas[dname]=0
 		data = []
 		for lidx, layer in enumerate( ob.data.layers ):
-			for sidx, stroke in enumerate( layer.frames[0].strokes ):
+			for sidx, stroke in enumerate( layer.frames[0].drawing.strokes ):
 				datas[dname] += len(stroke.points)
 				mat = ob.data.materials[stroke.material_index]
 				use_fill = 0
@@ -895,7 +896,7 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 
 					## default 32bit floats ##
 					for pnt in stroke.points:
-						x1,y1,z1 = pnt.co
+						x1,y1,z1 = pnt.position
 						x1 *= sx
 						z1 *= sz
 						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
@@ -912,7 +913,7 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 					data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
 					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
 
-					x0,y0,z0 = stroke.points[0].co
+					x0,y0,z0 = stroke.points[0].position
 					q = qstroke['q']
 					qs = qstroke['qs']
 					setup += [
@@ -926,7 +927,7 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 					## default 32bit floats ##
 					s = []
 					for pnt in stroke.points:
-						x1,y1,z1 = pnt.co
+						x1,y1,z1 = pnt.position
 						x1 *= sx
 						z1 *= sz
 						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
@@ -999,11 +1000,11 @@ def quantizer(points, quant, trim=True):
 		q = SCALE
 		qs = 1
 
-	x0,y0,z0 = points[0].co
+	x0,y0,z0 = points[0].position
 
 	mvec = []
 	for pnt in points[1:]:
-		x1,y1,z1 = pnt.co
+		x1,y1,z1 = pnt.position
 		dx = int( (x0-x1)*q )
 		dz = int( (z0-z1)*q )
 		if quant=='4bits':
@@ -1013,7 +1014,6 @@ def quantizer(points, quant, trim=True):
 			elif dx < -8:
 				print('WARN: 4bit vertex clip x=', dx)
 				dx = -8
-
 			if dz > 7:
 				print('WARN: 4bit vertex clip z=', dz)
 				dz = 7
@@ -1033,7 +1033,6 @@ def quantizer(points, quant, trim=True):
 			elif dz < -32:
 				print('WARN: 6bit vertex clip z=', dz)
 				dz = -32
-
 		if quant in ('6bits', '7bits'):
 			if mvec:
 				mdx, mdz = mvec[0]
@@ -1054,7 +1053,6 @@ def quantizer(points, quant, trim=True):
 			else:
 				v = ( dx, dz )
 			mvec.append(v)
-
 			if len(mvec) >= 3:
 				s.append('{%s}' % ', '.join( '%s,%s' % v for v in mvec))
 				#s.append('{%s}' % (str(mvec)[1:-1]))
@@ -1078,25 +1076,22 @@ def quantizer(points, quant, trim=True):
 				mvec.append(mvec[-1])
 		print('filled:', mvec)
 		s.append('{%s}' % ', '.join( '%s,%s' % v for v in mvec))
-
 	return {'q':q, 'qs':qs, 'points':s}
 
-
-def calc_stroke_width(stroke):
+def calc_stroke_width (stroke):
 	sw = 0.0
 	for p in stroke.points:
-		sw += p.pressure
+		sw += p.radius
 		#sw += p.strength
 	sw /= len(stroke.points)
-	return sw * stroke.line_width * 0.05
-
+	return sw * stroke.softness * 0.05
 
 def calc_center(points):
 	ax = ay = az = 0.0
 	for p in points:
-		ax += p.co.x
-		ay += p.co.y
-		az += p.co.z
+		ax += p.position.x
+		ay += p.position.y
+		az += p.position.z
 	ax /= len(points)
 	ay /= len(points)
 	az /= len(points)
@@ -1416,7 +1411,6 @@ raylib_like_api = {
 		this.entryFunction=this.wasm.instance.exports.__indirect_function_table.get(f)
 	}
 	''',
-
 	'InitWindow' : '''
 	InitWindow(w,h,ptr){
 		this.canvas.width=w;
@@ -1429,19 +1423,16 @@ raylib_like_api = {
 		return this.canvas.width
 	}
 	''',
-
 	'GetScreenHeight':'''
 	GetScreenHeight(){
 		return this.canvas.height
 	}
 	''',
-
 	'GetFrameTime':'''
 	GetFrameTime(){
 		return Math.min(this.dt,1/30/2)
 	}
 	''',
-
 	'DrawRectangleV':'''
 	DrawRectangleV(pptr,sptr,cptr){
 		const buf=this.wasm.instance.exports.memory.buffer;
@@ -1451,7 +1442,6 @@ raylib_like_api = {
 		this.ctx.fillRect(p[0],p[1],s[0],s[1])
 	}
 	''',
-
 	'DrawSplineLinearWASM':'''
 	DrawSplineLinearWASM(ptr,l,t,fill,r,g,b,a){
 		const buf=this.wasm.instance.exports.memory.buffer;
@@ -1469,7 +1459,6 @@ raylib_like_api = {
 		this.ctx.stroke()
 	}
 	''',
-
 	'DrawCircleWASM':'''
 	DrawCircleWASM(x,y,rad,ptr){
 		const buf=this.wasm.instance.exports.memory.buffer;
@@ -1482,21 +1471,17 @@ raylib_like_api = {
 		this.ctx.stroke()
 	}
 	''',
-
 	'ClearBackground':'''
 	ClearBackground(ptr) {
 		this.ctx.fillStyle = getColorFromMemory(this.wasm.instance.exports.memory.buffer, ptr);
 		this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height)
 	}
 	''',
-
-
 	'GetRandomValue':'''
 	GetRandomValue(min,max) {
 		return min+Math.floor(Math.random()*(max-min+1))
 	}
 	''',
-
 	'ColorFromHSV':'''
 	ColorFromHSV(result_ptr, hue, saturation, value) {
 		const buffer = this.wasm.instance.exports.memory.buffer;
@@ -1529,7 +1514,6 @@ raylib_like_api = {
 		result[3] = 255;
 	}
 	''',
-
 }
 
 raylib_like_api_mini = {}
@@ -1650,29 +1634,29 @@ def gen_js_api(world, c3, user_methods):
 				js = js.replace(rep, rmap[rep])
 	return js
 
-def gen_html(world, wasm, c3, user_html=None, background='', user_methods={}, debug='--debug' in sys.argv):
-	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', wasm]
+def gen_html (world, wasm, c3, user_html = None, background = '', user_methods = {}, debug = '--debug' in sys.argv):
+	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', wasm ]
 	print(cmd)
+	
 	subprocess.check_call(cmd)
+	
 	wa = open(wasm,'rb').read()
 	w = open(wasm+'.gz','rb').read()
 	b = base64.b64encode(w).decode('utf-8')
-
 	jtmp = '/tmp/c3api.js'
 	jslib = gen_js_api(world, c3, user_methods)
-
 	open(jtmp,'w').write(jslib)
 	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
 	print(cmd)
-	subprocess.check_call(cmd)
-	js = open(jtmp+'.gz','rb').read()
-	jsb = base64.b64encode(js).decode('utf-8')
 
+	subprocess.check_call(cmd)
+	
+	js = open(jtmp + '.gz', 'rb').read()
+	jsb = base64.b64encode(js).decode('utf-8')
 	if '--debug' in sys.argv:
 		background = 'red'
 	if background:
 		background = 'style="background-color:%s"' % background
-
 	if world.c3_invalid_html:
 		o = [
 			'<canvas id=$><script>',
@@ -1683,7 +1667,6 @@ def gen_html(world, wasm, c3, user_html=None, background='', user_methods={}, de
 			'</script>',
 		]
 		hsize = len('\n'.join(o))
-
 	else:
 		o = [
 			'<html>',
@@ -1697,17 +1680,13 @@ def gen_html(world, wasm, c3, user_html=None, background='', user_methods={}, de
 		]
 		if user_html:
 			o += user_html
-
 		hsize = len('\n'.join(o)) + len('</body></html>')
-
 	_BUILD_INFO['html-size'] = hsize
 	_BUILD_INFO['jslib-size'] = len(jslib)
 	_BUILD_INFO['jslib-gz-size'] = len(js)
-
 	if debug:
 		if world.c3_invalid_html:
 			o.append('</canvas>')
-
 		o += [
 			'<pre>',
 			'jslib bytes=%s' % len(jslib),
@@ -1724,24 +1703,21 @@ def gen_html(world, wasm, c3, user_html=None, background='', user_methods={}, de
 		for ob in bpy.data.objects:
 			if ob.type=='GPENCIL':
 				o.append('%s = %s' % (ob.name, ob.data.c3_grease_quantize))
-
 		o.append('</pre>')
-
 	if not world.c3_invalid_html:
 		o += [
 			'</body>',
 			'</html>',
-
 		]
-
 	return '\n'.join(o)
 
-
-def wasm_opt(wasm):
+def wasm_opt (wasm):
 	o = wasm.replace('.wasm', '.opt.wasm')
-	cmd = ['wasm-opt', '-o',o, '-Oz', wasm]
+	cmd = [ 'wasm-opt', '-o',o, '-Oz', wasm ]
 	print(cmd)
+	
 	subprocess.check_call(cmd)
+	 
 	return o
 
 SERVER_PROC = None
@@ -1844,8 +1820,8 @@ bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
 	]
 )
 
-bpy.types.GreasePencil.c3_grease_optimize = bpy.props.IntProperty(name="grease pencil optimize", min=0, max=8)
-bpy.types.GreasePencil.c3_grease_quantize = bpy.props.EnumProperty(
+bpy.types.GreasePencilv3.c3_grease_optimize = bpy.props.IntProperty(name="grease pencil optimize", min=0, max=8)
+bpy.types.GreasePencilv3.c3_grease_quantize = bpy.props.EnumProperty(
 	name='quantize',
 	items=[
 		("32bits", "32bits", "32bit vertices"), 
@@ -2052,7 +2028,9 @@ if __name__=='__main__':
 			bpy.data.worlds[0].c3_miniapi = True
 			bpy.data.worlds[0].c3_js13kb = True
 			bpy.data.worlds[0].c3_invalid_html = True
-
+	for ob in bpy.data.objects:
+		if ob.type == 'MESH':
+			ob.material_slots[0].material.use_nodes = False
 	if '--test' in sys.argv or test:
 		import c3blendgen
 		if test:
@@ -2063,5 +2041,3 @@ if __name__=='__main__':
 		build_wasm( bpy.data.worlds[0] )
 	elif '--linux' in sys.argv:
 		build_linux( bpy.data.worlds[0] )
-
-
