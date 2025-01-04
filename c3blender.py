@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 import os, sys, subprocess, atexit, webbrowser, base64, string
 from random import random, uniform
 _thisdir = os.path.split(os.path.abspath(__file__))[0]
@@ -6,20 +5,19 @@ sys.path.append(_thisdir)
 
 C3 = '/usr/local/bin/c3c'
 C3_STRIP_TAIL = True
-
-islinux=iswindows=c3gz=c3zip=None
+isLinux = isWindows = c3gz = c3zip = None
 if sys.platform == 'win32':
 	BLENDER = 'C:/Program Files/Blender Foundation/Blender 4.2/blender.exe'
 	c3zip = 'https://github.com/c3lang/c3c/releases/download/latest/c3-windows.zip'
-	C3 = os.path.join(_thisdir,'c3/c3c.exe')
-	iswindows=True
+	C3 = os.path.join(_thisdir, 'c3/c3c.exe')
+	isWindows = True
 elif sys.platform == 'darwin':
 	BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender'
 	c3zip = 'https://github.com/c3lang/c3c/releases/download/latest/c3-macos.zip'
 else:
 	BLENDER = 'blender'
 	c3gz = 'https://github.com/c3lang/c3c/releases/download/latest/c3-ubuntu-20.tar.gz'
-	islinux=True
+	isLinux = True
 
 if not os.path.isfile(C3):
 	C3 = '/opt/c3/c3c'
@@ -33,7 +31,7 @@ if not os.path.isfile(C3):
 				cmd = 'tar -xvf c3-ubuntu-20.tar.gz'
 				print(cmd)
 				subprocess.check_call(cmd.split())
-			elif c3zip and iswindows:
+			elif c3zip and isWindows:
 				if not os.path.isfile('c3-windows.zip'):
 					cmd = ['C:/Windows/System32/curl.exe', '-o', 'c3-windows.zip', c3zip]
 					print(cmd)
@@ -44,30 +42,29 @@ if not os.path.isfile(C3):
 					print(cmd)
 					subprocess.check_call(cmd)
 
-		if islinux:
+		if isLinux:
 			C3 = os.path.abspath('./c3/c3c')
-		elif iswindows:
+		elif isWindows:
 			C3 = os.path.abspath('./c3/c3c.exe')
-
 print('c3c:', C3)
 assert os.path.isfile(C3)
 
-EMSDK = os.path.join(_thisdir, "emsdk")
-if "--install-wasm" in sys.argv and not os.path.isdir(EMSDK):
+EMSDK = os.path.join(_thisdir, 'emsdk')
+if '--install-wasm' in sys.argv and not os.path.isdir(EMSDK):
 	cmd = [
-		"git","clone","--depth","1",
-		"https://github.com/emscripten-core/emsdk.git",
+		'git','clone','--depth','1',
+		'https://github.com/emscripten-core/emsdk.git',
 	]
 	print(cmd)
 	subprocess.check_call(cmd)
 
-if iswindows:
-	EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc.exe")
-	WASM_OBJDUMP = os.path.join(EMSDK, "upstream/bin/llvm-objdump.exe")
+if isWindows:
+	EMCC = os.path.join(EMSDK, 'upstream/emscripten/emcc.exe')
+	WASM_OBJDUMP = os.path.join(EMSDK, 'upstream/bin/llvm-objdump.exe')
 else:
-	# EMCC = os.path.join(EMSDK, "upstream/emscripten/emcc")
+	# EMCC = os.path.join(EMSDK, 'upstream/emscripten/emcc')
 	EMCC = 'wasm-ld'
-	# WASM_OBJDUMP = os.path.join(EMSDK, "upstream/bin/llvm-objdump")
+	# WASM_OBJDUMP = os.path.join(EMSDK, 'upstream/bin/llvm-objdump')
 	WASM_OBJDUMP = ''
 
 def c3_wasm_strip(wasm):
@@ -81,12 +78,13 @@ def c3_wasm_strip(wasm):
 	open(wasm,'wb').write(c)
 
 
-def build(input='./demo.c3', output='demo', wasm='--wasm' in sys.argv, opt='--opt' in sys.argv, run=True, raylib='./raylib.c3'):
+def build (input = './demo.c3', output = 'demo', wasm = '--wasm' in sys.argv, opt = '--opt' in sys.argv, run = True, raylib = './raylib.c3'):
 	cmd = [C3]
-	if wasm: cmd += ['--target', 'wasm32']
-	else: cmd += ['--target', 'linux-x64', '-l', './raylib-5.0_linux_amd64/lib/libraylib.a']
+	if wasm:
+		cmd += [ '--target', 'wasm32' ]
+	else:
+		cmd += [ '--target', 'linux-x64', '-l', './raylib-5.0_linux_amd64/lib/libraylib.a' ]
 	mode = 'compile'
-
 	cmd += [
 		'--output-dir', '/tmp',
 		'--obj-out', '/tmp',
@@ -95,16 +93,14 @@ def build(input='./demo.c3', output='demo', wasm='--wasm' in sys.argv, opt='--op
 		'-o', output,
 	]
 	if wasm:
-		cmd += ['--link-libc=no', '--use-stdlib=no', '--no-entry', '--reloc=none', '-z', '--export-table']
+		cmd += [ '--link-libc=no', '--use-stdlib=no', '--no-entry', '--reloc=none', '-z', '--export-table' ]
 	else:
-		cmd += ['-l', 'glfw']
-
+		cmd += [ '-l', 'glfw' ]
 	if opt:
 		if type(opt) is str:
-			cmd.append('-'+opt)
+			cmd.append('-' + opt)
 		else:
 			cmd.append('-Oz')
-
 	cmd += [mode, input, raylib]
 	print(cmd)
 	res = subprocess.check_output(cmd).decode('utf-8')
@@ -113,7 +109,8 @@ def build(input='./demo.c3', output='demo', wasm='--wasm' in sys.argv, opt='--op
 		if ln.endswith('.o'):
 			ofiles.append(ln.strip())
 	print(ofiles)
-	if run and not wasm: subprocess.check_call(['/tmp/'+output])
+	if run and not wasm:
+		subprocess.check_call(['/tmp/' + output])
 	if wasm:
 		w = '/tmp/%s.wasm' % output
 		if C3_STRIP_TAIL:
@@ -121,7 +118,6 @@ def build(input='./demo.c3', output='demo', wasm='--wasm' in sys.argv, opt='--op
 		return w
 	else:
 		return '/tmp/%s' % output
-
 
 try:
 	import bpy
@@ -132,7 +128,7 @@ if __name__=='__main__':
 	if bpy:
 		pass
 	elif '--c3demo' in sys.argv:
-		## runs simple test without blender
+		# runs simple test without blender
 		build()
 		sys.exit()
 
@@ -142,7 +138,7 @@ if __name__=='__main__':
 			if arg.endswith('.blend'):
 				cmd.append(arg)
 				break
-		cmd +=['--python-exit-code', '1', '--python', __file__]
+		cmd += [ '--python-exit-code', '1', '--python', __file__ ]
 		exargs = []
 		for arg in sys.argv:
 			if arg.startswith('--'):
@@ -154,20 +150,17 @@ if __name__=='__main__':
 		subprocess.check_call(cmd)
 		sys.exit()
 
-
-## blender ##
+# blender #
 MAX_SCRIPTS_PER_OBJECT = 8
 MAX_OBJECTS_PER_TEXT = 4
 if not bpy:
-	if islinux:
+	if isLinux:
 		if not os.path.isfile('/usr/bin/blender'):
 			print('did you install blender?')
 			print('snap install blender')
 	else:
 		print('download blender from: https://blender.org')
-
 	sys.exit()
-
 HEADER = '''
 import raylib;
 def Entry = fn void();
@@ -208,9 +201,7 @@ struct Vector2_16bits @packed {
 	short x;
 	short y;
 }
-
 '''
-
 HEADER_OBJECT = '''
 struct Object {
 	Vector2 position;
@@ -221,7 +212,6 @@ struct Object {
 	bool hide;
 }
 '''
-
 HEADER_OBJECT_WASM = '''
 fn void Object.set_text(Object *obj, char *txt) {
 	html_set_text (obj.id, txt);
@@ -244,9 +234,7 @@ fn void Object.css_string(Object *obj, char *key, char *val) {
 fn void Object.css_int(Object *obj, char *key, int val) {
 	html_css_int (obj.id, key,val);
 }
-
 '''
-
 WASM_HELPERS = '''
 fn void transform_spline_wasm (Vector2 *source, Vector2 *target, int len, Vector2 pos, Vector2 scl){
 	for (int i=0; i<len; i++){
@@ -255,14 +243,11 @@ fn void transform_spline_wasm (Vector2 *source, Vector2 *target, int len, Vector
 	}
 }
 '''
-
 MAIN_WASM = '''
 	html_canvas_resize(%s, %s);
 	raylib_js_set_entry(&game_frame);
 
 '''
-
-
 MAIN = '''
 	raylib::init_window(%s, %s, "Hello, from C3");
 	raylib::set_target_fps(60);
@@ -273,7 +258,7 @@ MAIN = '''
 '''
 
 def is_maybe_circle(ob):
-	if len(ob.data.vertices)==32 and len(ob.data.polygons) == 1:
+	if len(ob.data.vertices) == 32 and len(ob.data.polygons) == 1:
 		return True
 	else:
 		return False
@@ -310,30 +295,31 @@ extern fn void html_eval (char *ptr) @extern("html_eval");
 
 extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
-
 '''
 
-def get_scripts(ob):
+def get_scripts (ob):
 	scripts = []
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
-		if getattr(ob, "c3_script%s_disable" %i): continue
+		if getattr(ob, "c3_script%s_disable" %i):
+			continue
 		txt = getattr(ob, "c3_script" + str(i))
-		if txt: scripts.append(macro_pointers(txt,ob))
+		if txt != None:
+			scripts.append(macro_pointers(txt, ob))
 	return scripts
 
-def has_scripts(ob):
+def has_scripts (ob):
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
 		txt = getattr(ob, "c3_script" + str(i))
-		if txt: return True
+		if txt != None:
+			return True
 	return False
 
-def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
+def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods = {}):
 	resx = world.c3_export_res_x
 	resy = world.c3_export_res_y
 	SCALE = world.c3_export_scale
-	offx = world.c3_export_offset_x
-	offy = world.c3_export_offset_y
-
+	offX = world.c3_export_offset_x
+	offY = world.c3_export_offset_y
 	unpackers = {}
 	head  = [HEADER, HEADER_OBJECT]
 	if wasm:
@@ -347,19 +333,14 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 					print(key)
 				assert key in s
 				s = s.replace(key, '@extern("%s")' % c3dom_api_mini[fname]['sym'])
-
 			for fname in raylib_like_api_mini:
 				key = '@extern("%s")' % fname
 				s = s.replace(key, '@extern("%s")' % raylib_like_api_mini[fname]['sym'])
-
 			head.append( s )
 		else:
 			head.append(WASM_EXTERN)
-
 		head.append(WASM_HELPERS)
-
-	setup = ['fn void main() @extern("main") @wasm {']
-
+	setup = [ 'fn void main() @extern("main") @wasm {' ]
 	global_funcs = {}
 	main_init = {}
 	for txt in bpy.data.texts:
@@ -372,12 +353,9 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			if itxt and itxt.name not in main_init:
 				main_init[itxt.name]=itxt
 				setup.append(itxt.as_string())
-
 	draw_header = [
 		'fn void game_frame() @extern("$") @wasm {',
-
 	]
-
 	draw  = [
 		#'fn void game_frame() @extern("$") @wasm {',
 		#'	Object self;',
@@ -389,38 +367,36 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 	else:
 		draw.append('	raylib::begin_drawing();')
 		draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
-
 	global_v2arrays = {}
 	meshes = []
+	curves = []
 	datas = {}
 	ascii_letters = list(string.ascii_uppercase)
 	prevparent = None
 	for ob in bpy.data.objects:
-		if ob.hide_get(): continue
+		if ob.hide_get():
+			continue
 		print(ob)
 		sname = safename(ob)
 		x,y,z = ob.location * SCALE
 		z = -z
-		x += offx
-		z += offy
-		sx,sy,sz = ob.scale * SCALE
+		x += offX
+		z += offY
+		sx, sy, sz = ob.scale * SCALE
 		idx = len(meshes)
 		if ob.type in ('MESH', 'GPENCIL', 'FONT'):
 			if not ob.name.startswith('_'):
 				#head.append('short %s_id=%s;' % (sname,idx))
 				head.append('const short %s_ID=%s;' % (sname.upper(),idx))
-
 		scripts = []
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			txt = getattr(ob, "c3_script" + str(i))
 			if txt:
 				if not getattr(ob, "c3_script%s_disable" %i):
 					scripts.append(macro_pointers(txt, ob, global_v2arrays))
-
 			txt = getattr(ob, "c3_method" + str(i))
 			if txt and txt.name not in methods:
 				tname = txt.name
-
 				assert '(' in tname
 				assert tname.endswith(')')
 				fname, args = tname.split('(')
@@ -430,42 +406,34 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				if not exdef.startswith('extern'):
 					exdef = 'extern ' + exdef
 				if not exdef.endswith(';'): exdef += ';'
-
 				args_def = exdef.split('@')[0].split('(')[-1].split(')')[0]
-
 				assert fname+'(' in exdef
 				exdef = exdef.replace(fname+'(', '%s(int _eltid,' % fname)
-
 				head.append(exdef)
-				args = args[:-1] ## strip )
+				args = args[:-1] # strip )
 				head += [
 
 					'fn void Object.%s(Object *_obj, %s) {' % (fname, args_def),
 					'	%s(_obj.id, %s);' % (fname, args),
 					'}', 
 				]
-
-
 				if '@extern("' in txt.c3_extern:
 					tname = txt.c3_extern.split('@extern("')[-1].split('"')[0]
 					if len(tname) <= 1:
 						print(txt)
 						raise SyntaxError('@extern names must be at least two characters: %s' % txt.c3_extern)
 					tname += '(' + txt.name.split('(')[-1]
-
 				methods[tname] = macro_pointers(txt, ob, global_v2arrays)
-
-
-
-
 		if ob.type=="MESH":
 			meshes.append(ob)
 			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
 			#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
-			materialColor = ob.material_slots[0].material.diffuse_color
+			if len(ob.material_slots) > 0:
+				materialColor = ob.material_slots[0].material.diffuse_color
+			else:
+				materialColor = [ 0.5, 0.5, 0.5 ]
 			setup.append('	objects[%s].color={%s,%s,%s,0xFF};' % (idx, int(materialColor[0] * 255), int(materialColor[1] * 255), int(materialColor[2] * 255) ))
-
 			draw.append('	self = objects[%s]; //MESH<:%s' % (idx, ob.name) )
 			if scripts:
 				props = {}
@@ -474,17 +442,15 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 					#head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
 					head.append('float %s_%s = %s;' %(prop,sname, ob[prop]))
 					props[prop] = ob[prop]
-
-				## user C3 scripts
+				# user C3 scripts
 				for s in scripts:
 					for prop in props:
 						if 'self.'+prop in s:
 							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
 							s = s.replace('self.'+prop, '%s_%s'%(prop,sname))
 					draw.append('\t' + s)
-				## save object state: from stack back to heap
+				# save object state: from stack back to heap
 				draw.append('	objects[%s] = self; //MESH>:%s' % (idx,ob.name))
-
 			if ob.display_type in ('TEXTURED', 'SOLID'):
 				if is_maybe_circle(ob):
 					rad = ob.data.vertices[0].co.y
@@ -507,12 +473,12 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
 				sx,sy,sz = ob.scale
 				setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
-
 			if wasm:
 				grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, idx)
 			else:
 				grease_to_c3_raylib(ob, datas, head, draw, setup)
-
+		elif ob.type == 'CURVE':
+			curves.append(ob)
 		elif ob.type=='FONT' and wasm:
 			cscale = ob.data.size*SCALE
 			if use_html:
@@ -520,21 +486,17 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 				div = '<div id="%s" style="%s">%s</div>' %(sname, css, ob.data.body)
 				html.append(div)
 				continue
-
 			meshes.append(ob)
 			hide = 'false'
 			if ob.c3_hide:
 				setup.append('	objects[%s].hide=true;' % idx)
 				hide = 'true'
-
 			if ob.parent:
-				x,y,z = ob.location * SCALE
+				x, y, z = ob.location * SCALE
 				z = -z
-
 			dom_name = ob.name
 			if dom_name.startswith('_'):
 				dom_name = ''
-
 			if ob.parent and has_scripts(ob.parent):
 				setup += [
 					'	objects[%s].position={%s,%s};' % (idx, x+(cscale*0.1),z-(cscale*1.8)),
@@ -543,8 +505,8 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 			elif ob.parent:
 				fx = x+(cscale*0.1)
 				fy = z-(cscale*1.8)
-				fx += (ob.parent.location.x * SCALE) + offx
-				fy += (ob.parent.location.z * SCALE) + offy
+				fx += (ob.parent.location.x * SCALE) + offX
+				fy += (ob.parent.location.z * SCALE) + offY
 				setup += [
 					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, fx,fy, cscale, hide, dom_name),
 				]
@@ -577,56 +539,46 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 						'}',
 					]
 				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
-
 			if ob.location.y >= 0.1:
 				setup.append('	html_css_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y*10)))
 			elif ob.location.y <= -0.1:
 				setup.append('	html_css_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
-
-			## slightly bigger than using html_css_zindex
+			# slightly bigger than using html_css_zindex
 			#if ob.location.y >= 0.1:
 			#	setup.append('	html_css_int(objects[%s].id,"zIndex",-%s);' % (idx, int(ob.location.y*10)))
 			#elif ob.location.y <= -0.1:
 			#	setup.append('	html_css_int(objects[%s].id,"zIndex", %s);' % (idx, abs(int(ob.location.y*10))) )
-
-
 			if scripts or (ob.parent and has_scripts(ob.parent)):
 				draw.append('	self = objects[%s]; // %s' % (idx,ob.name))
-
 			if scripts:
 				props = {}
 				for prop in ob.keys():
 					if prop.startswith( ('_', 'c3_') ): continue
 					#head.append('float %s_%s = %s;' %(sname, prop, ob[prop])) 
-					## Error: A letter must precede any digit `__001` (object copy in blender renames with .00N)
+					# Error: A letter must precede any digit `__001` (object copy in blender renames with .00N)
 					if ob[prop]==0:
 						head.append('float %s_%s;' %(prop,sname))
 					else:
 						head.append('float %s_%s = %s;' %(prop,sname, ob[prop]))
 					props[prop] = ob[prop]
-
-				## user C3 scripts
+				# user C3 scripts
 				for s in scripts:
 					for prop in props:
 						if 'self.'+prop in s:
 							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
 							s = s.replace('self.'+prop, '%s_%s'%(prop,sname))
 					draw.append('\t' + s)
-
 			if ob.parent and has_scripts(ob.parent):
 				if prevparent != ob.parent.name:
 					prevparent = ob.parent.name
-
 					#draw.append('parent = objects[%s_id];' % safename(ob.parent))
 					draw.append('parent = objects[%s_ID];' % safename(ob.parent).upper())
-
 				draw += [
 					#'parent = objects[%s_id];' % safename(ob.parent),
 					#'self.position.x=parent.position.x;',
 					#'self.position.y=parent.position.y;',
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
 				]
-
 		if ob.type in ('MESH', 'GPENCIL', 'FONT'):
 			if not ob.name.startswith('_'):
 				if ob.c3_script_init:
@@ -634,59 +586,44 @@ def blender_to_c3(world, wasm=False, html=None, use_html=False, methods={}):
 						'	Object self=objects[%s_ID];' % sname.upper(),
 						ob.c3_script_init.as_string(),
 					'	}']
-
 	if global_v2arrays:
 		for gname in global_v2arrays:
 			head.append(global_v2arrays[gname])
-
 	if wasm:
 		setup.append(MAIN_WASM % (resx, resy))
 	else:
 		setup.append(MAIN % (resx, resy))
-
 	setup.append('}')
-
-
 	if 'self' in '\n'.join(draw):
 		draw_header.append('	Object self;')
 	if 'parent' in '\n'.join(draw):
 		draw_header.append('	Object parent;')
 	if 'delta_time' in '\n'.join(draw):
 		draw_header.append('	float delta_time = raylib::get_frame_time();')
-
-
 	if not wasm:
 		draw.append('	raylib::end_drawing();')
-
 	draw.append('}')
-
-	head.append('Object[%s] objects;' % len(meshes))
-
+	head.append('Object[%s] objects;' % len(meshes + curves))
 	if unpackers:
 		for gkey in unpackers:
 			head += unpackers[gkey]
-
 	for dname in datas:
 		print(dname)
 		print('orig-points:', datas[dname]['orig-points'])
 		print('total-points:',datas[dname]['total-points'])
 	return head + setup + draw_header + draw
 
-def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
-	print('YAY1')
+def grease_to_c3_wasm (ob, datas, head, draw, setup, scripts, obIndex):
 	SCALE = WORLD.c3_export_scale
-	offx = WORLD.c3_export_offset_x
-	offy = WORLD.c3_export_offset_y
+	offX = WORLD.c3_export_offset_x
+	offY = WORLD.c3_export_offset_y
 	sx,sy,sz = ob.scale * SCALE
 	x,y,z = ob.location * SCALE
-
 	dname = safename(ob.data)
 	gquant = False
 	if ob.data.c3_grease_quantize != '32bits':
 		gquant = ob.data.c3_grease_quantize
-
 	gopt = ob.data.c3_grease_optimize
-
 	if dname not in datas:
 		datas[dname]={'orig-points':0, 'total-points':0, 'draw':[]}
 		data = []
@@ -696,14 +633,12 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 				mat = ob.data.materials[stroke.material_index]
 				use_fill = 0
 				if mat.grease_pencil.show_fill: use_fill = 1
-
 				if gopt:
 					points = []
 					for pidx in range(0, len(stroke.points), gopt):
 						points.append( stroke.points[pidx] )
 				else:
 					points = stroke.points
-
 				s = []
 				if gquant:
 					qstroke = quantizer(points, gquant)
@@ -722,17 +657,14 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 						'	%s, %s' % (x0*q, z0*q),
 						');',
 					]
-
 					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
-
 					if gquant in ('6bits', '7bits'):
 						data.append('Vector2[%s] __%s__%s_%s;' % ( (n*3),dname, lidx, sidx ))
 					else:
 						data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
 						n += 1
-
 				else:
-					## default 32bit floats ##
+					# default 32bit floats #
 					s = []
 					if scripts:
 						for pnt in points:
@@ -743,55 +675,47 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 							x1,y1,z1 = pnt.position
 							x1 *= sx
 							z1 *= sz
-							s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-
+							s.append('{%s,%s}' % (x1+offX+x,-z1+offY+z))
 					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(points),dname, lidx, sidx, ','.join(s) ))
 					n = len(s)
-
-
 				if gquant in ('6bits', '7bits'):
 					nn = n*3
 				else:
 					nn = n
-
 				r,g,b,a = mat.grease_pencil.fill_color
 				swidth = calc_stroke_width(stroke)
-				datas[dname]['draw'].append({'layer':lidx, 'index':sidx, 'length':nn, 'width':swidth, 'fill':use_fill, 'color':[r,g,b,a]})
-
+				datas[dname]['draw'].append({'layer':lidx, 'index':sidx, 'length':nn, 'width':swidth, 'fill':use_fill, 'color':[r, g, b, a]})
 		head += data
 		if gquant:
 			if gquant in ('6bits', '7bits'):
-				head += gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy)
+				head += gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offX, offY)
 			else:
-				head += gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy)
-
+				head += gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offX, offY)
 	oname = sname = safename(ob)
 	if scripts:
-		draw.append('	self = objects[%s];' % obj_index)
+		draw.append('	self = objects[%s];' % obIndex)
 		props = {}
 		for prop in ob.keys():
 			if prop.startswith( ('_', 'c3_') ): continue
 			head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
 			props[prop] = ob[prop]
-
-		## user C3 scripts
+		# user C3 scripts
 		for s in scripts:
 			for prop in props:
 				if 'self.'+prop in s:
 					s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
 			draw.append('\t' + s)
-		## save object state: from stack back to heap
-		draw.append('	objects[%s] = self; // %s' % (obj_index, ob.name))
-
+		# save object state: from stack back to heap
+		draw.append('	objects[%s] = self; // %s' % (obIndex, ob.name))
 	for a in datas[dname]['draw']:
 		r,g,b,alpha = a['color']
-		r = int(r*255)
-		g = int(g*255)
-		b = int(b*255)
+		r = int(r * 255)
+		g = int(g * 255)
+		b = int(b * 255)
 		if not scripts:
-			## static grease pencil
+			# static grease pencil
 			if a['fill']:
-				draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r,g,b,alpha))
+				draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r, g, b, alpha))
 			else:
 				draw.append('	draw_spline_wasm(&__%s__%s_%s,%s,%s, 0, 0,0,0,0);' % (dname, a['layer'], a['index'], a['length'], a['width']))
 		else:
@@ -799,79 +723,74 @@ def grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, obj_index):
 			head.append('Vector2[%s] _%s_%s_%s;' % tuple([a['length']]+tag) )
 			dtag = [dname, a['layer'], a['index']]
 			draw += [
-				'	transform_spline_wasm(&__%s__%s_%s, &_%s_%s_%s, %s, objects[%s].position, objects[%s].scale);' %tuple(dtag+tag+[a['length'],obj_index, obj_index]),
-				'	draw_spline_wasm(&_%s_%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (oname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r,g,b,alpha)
+				'	transform_spline_wasm(&__%s__%s_%s, &_%s_%s_%s, %s, objects[%s].position, objects[%s].scale);' %tuple(dtag+tag+[a['length'], obIndex, obIndex]),
+				'	draw_spline_wasm(&_%s_%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (oname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r, g, b, alpha)
 			]
 
-def gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
+def gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offX, offY):
 	x,y,z = ob.location * SCALE
 	sx,sy,sz = ob.scale
 	gkey = (dname, gquant)
-	## TODO only gen single packer per quant
+	# TODO only gen single packer per quant
 	qkey = gquant.split('bit')[0]
 	return [
 		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0) @extern("u%s") {' %(dname, gquant, qkey),
 		'	int j=0;',
-		'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
-		'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
+		'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offX+x),
+		'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offY+z),
 		'	for (int i=0; i<len; i++){',
-		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs*sx, offx+x),
-		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' % (qs*sz, offy+z),
+		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs*sx, offX+x),
+		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' % (qs*sz, offY+z),
 
 		'		j++;',
 		'		out[j].x = ax;',
 		'		out[j].y = ay;',
 
 		'		j++;',
-		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x1)) * %sf) + %sf;' % (qs*sx, offx+x),
-		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y1)) * %sf) + %sf;' % (qs*sz, offy+z),
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x1)) * %sf) + %sf;' % (qs*sx, offX+x),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y1)) * %sf) + %sf;' % (qs*sz, offY+z),
 
 		'		j++;',
-		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' % (qs*sx, offx+x),
-		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' % (qs*sz, offy+z),
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' % (qs*sx, offX+x),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' % (qs*sz, offY+z),
 
 
 		'	}',
 		'}'
 	]
 
-
-def gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offx, offy):
-	x,y,z = ob.location * SCALE
-	sx,sy,sz = ob.scale
+def gen_delta_unpacker (ob, dname, gquant, SCALE, qs, offX, offY):
+	x, y, z = ob.location * SCALE
+	sx, sy, sz = ob.scale
 	gkey = (dname, gquant)
 	return [
 		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
-		'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
-		'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
-		'	for (int i=0; i<len; i++){',
-		'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
-		'		out[i+1].x = a;',
-		'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
-		'		out[i+1].y = a;',
+		'	out[0].x = (x0*%sf) + %sf;' %(qs * sx, offX + x),
+		'	out[0].y = -(z0*%sf) + %sf;'  % (qs * sz, offY + z),
+		'	for (int i = 0; i < len; i ++){',
+		'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs * sx, offX + x),
+		'		out[i + 1].x = a;',
+		'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs * sz, offY + z),
+		'		out[i + 1].y = a;',
 		'	}',
 		'}'
 	]
 
-
-def grease_to_c3_raylib(ob, datas, head, draw, setup):
-	print('YAY2')
+def grease_to_c3_raylib (ob, datas, head, draw, setup):
 	SCALE = WORLD.c3_export_scale
-	offx = WORLD.c3_export_offset_x
-	offy = WORLD.c3_export_offset_y
-	sx,sy,sz = ob.scale * SCALE
-	x,y,z = ob.location * SCALE
-
+	offX = WORLD.c3_export_offset_x
+	offY = WORLD.c3_export_offset_y
+	sx, sy, sz = ob.scale * SCALE
+	x, y, z = ob.location * SCALE
 	dname = safename(ob.data)
 	gquant = False
 	if ob.data.c3_grease_quantize != '32bits':
 		gquant = ob.data.c3_grease_quantize
-
 	if dname not in datas:
-		datas[dname]=0
+		datas[dname] = 0
 		data = []
-		for lidx, layer in enumerate( ob.data.layers ):
-			for sidx, stroke in enumerate( layer.frames[0].drawing.strokes ):
+		for lidx, layer in enumerate(ob.data.layers):
+			for sidx, stroke in enumerate(layer.frames[0].drawing.strokes):
 				datas[dname] += len(stroke.points)
 				mat = ob.data.materials[stroke.material_index]
 				use_fill = 0
@@ -882,7 +801,7 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 						x1,y1,z1 = calc_center(stroke.points)
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
+						s.append('{%s,%s}' % (x1+offX+x,-z1+offY+z))
 					elif mat.c3_export_tristrip:
 						tri_strip = True
 					else:
@@ -893,17 +812,14 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 							tris.append(tri.v3)
 						tris = ','.join([str(vidx) for vidx in tris])
 						data.append('int[%s] __%s__%s_%s_tris = {%s};' % (len(stroke.triangles)*3,dname, lidx, sidx, tris ))
-
-					## default 32bit floats ##
+					# default 32bit floats #
 					for pnt in stroke.points:
 						x1,y1,z1 = pnt.position
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-
+						s.append('{%s,%s}' % (x1+offX+x,-z1+offY+z))
 					n = len(s)
 					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (n, dname, lidx, sidx, ','.join(s) ))
-
 				elif gquant:
 					qstroke = quantizer(stroke.points, gquant)
 					n = len(qstroke['points'])
@@ -912,8 +828,7 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 						continue
 					data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
 					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
-
-					x0,y0,z0 = stroke.points[0].position
+					x0, y0, z0 = stroke.points[0].position
 					q = qstroke['q']
 					qs = qstroke['qs']
 					setup += [
@@ -924,30 +839,26 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 						');',
 					]
 				else:
-					## default 32bit floats ##
+					# default 32bit floats #
 					s = []
 					for pnt in stroke.points:
 						x1,y1,z1 = pnt.position
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' % (x1+offx+x,-z1+offy+z))
-
+						s.append('{%s,%s}' % (x1+offX+x,-z1+offY+z))
 					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(stroke.points),dname, lidx, sidx, ','.join(s) ))
 					n = len(s)
-
-				r,g,b,a = mat.grease_pencil.fill_color
+				r, g, b, a = mat.grease_pencil.fill_color
 				swidth = calc_stroke_width(stroke)
-
-
 				if use_fill:
-					clr = '{%s,%s,%s,%s}' % (int(r*255), int(g*255), int(b*255), int(a*255))
+					clr = '{%s,%s,%s,%s}' % (int(r * 255), int(g * 255), int(b * 255), int(a * 255))
 					if mat.c3_export_trifan:
 						draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n, clr))
 					elif mat.c3_export_tristrip:
 						draw.append('	raylib::draw_triangle_strip(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n, clr))
 					else:
 						draw += [
-							'	for (int i=0; i<%s; i+=3){' % (len(stroke.triangles)*3),
+							'	for (int i=0; i<%s; i+=3){' % (len(stroke.triangles) * 3),
 							'		int idx = __%s__%s_%s_tris[i+2];' %(dname, lidx, sidx),
 							'		Vector2 v1 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
 							'		idx = __%s__%s_%s_tris[i+1];'   %(dname, lidx, sidx),
@@ -957,56 +868,49 @@ def grease_to_c3_raylib(ob, datas, head, draw, setup):
 							'		raylib::draw_triangle(v1,v2,v3, %s);' % clr,
 							'	}',
 						]
-
 					if mat.grease_pencil.show_stroke:
 						draw.append('	raylib::draw_spline( (&__%s__%s_%s), %s, 4.0, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n))
 				else:
 					draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, %s, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n, swidth))
-
 		head += data
 		if gquant:
-			x,y,z = ob.location * SCALE
-			sx,sy,sz = ob.scale
-			gkey = (dname, gquant)
+			x, y, z = ob.location * SCALE
+			sx, sy, sz = ob.scale
+			gkey = ( dname, gquant )
 			head += [
 				'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
-				'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offx+x),
-				'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offy+z),
-				'	for (int i=0; i<len; i++){',
-				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs*sx, offx+x),
-				'		out[i+1].x = a;',
-				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs*sz, offy+z),
-				'		out[i+1].y = a;',
+				'	out[0].x = (x0*%sf) + %sf;' %(qs * sx, offX + x),
+				'	out[0].y = -(z0*%sf) + %sf;'  % (qs * sz, offY + z),
+				'	for (int i = 0; i < len; i ++){',
+				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs * sx, offX + x),
+				'		out[i + 1].x = a;',
+				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs * sz, offY + z),
+				'		out[i + 1].y = a;',
 				'	}',
 				'}'
 			]
 
-def quantizer(points, quant, trim=True):
+def quantizer (points, quant, trim = True):
 	SCALE = WORLD.c3_export_scale
-
 	s = []
-	if quant=='4bits':
+	if quant == '4bits':
 		q = SCALE * 0.125
 		qs = 8
-	elif quant=='6bits' or quant=='7bits':
+	elif quant == '6bits' or quant=='7bits':
 		q = SCALE * 0.5
 		qs = 2
-	elif quant=='8bits' or quant == "7x5x4bits":
+	elif quant == '8bits' or quant == "7x5x4bits":
 		q = SCALE * 0.5
 		qs = 2
-		#q = SCALE * 0.75
-		#qs = 1.333
 	else:
 		q = SCALE
 		qs = 1
-
-	x0,y0,z0 = points[0].position
-
+	x0, y0, z0 = points[0].position
 	mvec = []
 	for pnt in points[1:]:
 		x1,y1,z1 = pnt.position
-		dx = int( (x0-x1)*q )
-		dz = int( (z0-z1)*q )
+		dx = int((x0 - x1) * q)
+		dz = int((z0 - z1) * q)
 		if quant=='4bits':
 			if dx > 7:
 				print('WARN: 4bit vertex clip x=', dx)
@@ -1036,15 +940,15 @@ def quantizer(points, quant, trim=True):
 		if quant in ('6bits', '7bits'):
 			if mvec:
 				mdx, mdz = mvec[0]
-				## delta of delta
+				# delta of delta
 				ddx = mdx-dx
 				ddy = mdz-dz
-				if quant == '6bits':  ## after 5bits
+				if quant == '6bits':  # after 5bits
 					if ddx >= 16: ddx = 15
 					elif ddx < -16: ddx = -16
 					if ddy >= 16: ddy = 15
 					elif ddy < -16: ddy = -16
-				else:  ## after 4bits
+				else:  # after 4bits
 					if ddx >= 8: ddx = 7
 					elif ddx < -8: ddx = -8
 					if ddy >= 8: ddy = 7
@@ -1055,17 +959,13 @@ def quantizer(points, quant, trim=True):
 			mvec.append(v)
 			if len(mvec) >= 3:
 				s.append('{%s}' % ', '.join( '%s,%s' % v for v in mvec))
-				#s.append('{%s}' % (str(mvec)[1:-1]))
 				mvec = []
 		else:
-			vec = '{%s,%s}' % ( dx, dz )
+			vec = '{%s,%s}' % (dx, dz)
 			if trim:
-				#if (dx==0 and dz==0):
-				#	continue
 				if s and s[-1] == vec:
 					continue
 			s.append(vec)
-
 	if mvec:
 		print('tooshort:', mvec)
 		if len(mvec) == 1:
@@ -1075,8 +975,8 @@ def quantizer(points, quant, trim=True):
 			while len(mvec) < 3:
 				mvec.append(mvec[-1])
 		print('filled:', mvec)
-		s.append('{%s}' % ', '.join( '%s,%s' % v for v in mvec))
-	return {'q':q, 'qs':qs, 'points':s}
+		s.append('{%s}' % ', '.join('%s,%s' % v for v in mvec))
+	return { 'q' : q, 'qs' : qs, 'points' : s }
 
 def calc_stroke_width (stroke):
 	sw = 0.0
@@ -1086,7 +986,7 @@ def calc_stroke_width (stroke):
 	sw /= len(stroke.points)
 	return sw * stroke.softness * 0.05
 
-def calc_center(points):
+def calc_center (points):
 	ax = ay = az = 0.0
 	for p in points:
 		ax += p.position.x
@@ -1095,7 +995,7 @@ def calc_center(points):
 	ax /= len(points)
 	ay /= len(points)
 	az /= len(points)
-	return (ax,ay,az)
+	return (ax, ay, az)
 
 _BUILD_INFO = {
 	'native': None,
@@ -1105,37 +1005,42 @@ _BUILD_INFO = {
 	'zip'     : None,
 	'zip-size': None,
 }
-@bpy.utils.register_class
-class C3Export(bpy.types.Operator):
-	bl_idname = "c3.export"
-	bl_label = "C3 Export EXE"
-	@classmethod
-	def poll(cls, context):
-		return True
-	def execute(self, context):
-		exe = build_linux(context.world)
-		_BUILD_INFO['native']=exe
-		_BUILD_INFO['native-size']=len(open(exe,'rb').read())
-		return {"FINISHED"}
 
 @bpy.utils.register_class
 class C3Export(bpy.types.Operator):
-	bl_idname = "c3.export_wasm"
-	bl_label = "C3 Export WASM"
+	bl_idname = 'c3.export'
+	bl_label = 'C3 Export EXE'
+
 	@classmethod
-	def poll(cls, context):
+	def poll (cls, context):
 		return True
-	def execute(self, context):
+
+	def execute (self, context):
+		exe = build_linux(context.world)
+		_BUILD_INFO['native'] = exe
+		_BUILD_INFO['native-size'] = len(open(exe, 'rb').read())
+		return {'FINISHED'}
+
+@bpy.utils.register_class
+class C3Export(bpy.types.Operator):
+	bl_idname = 'c3.export_wasm'
+	bl_label = 'C3 Export WASM'
+
+	@classmethod
+	def poll (cls, context):
+		return True
+
+	def execute (self, context):
 		exe = build_wasm(context.world)
-		return {"FINISHED"}
+		return {'FINISHED'}
 
 @bpy.utils.register_class
 class C3WorldPanel(bpy.types.Panel):
-	bl_idname = "WORLD_PT_C3World_Panel"
-	bl_label = "C3 Export"
-	bl_space_type = "PROPERTIES"
-	bl_region_type = "WINDOW"
-	bl_context = "world"
+	bl_idname = 'WORLD_PT_C3World_Panel'
+	bl_label = 'C3 Export'
+	bl_space_type = 'PROPERTIES'
+	bl_region_type = 'WINDOW'
+	bl_context = 'world'
 
 	def draw(self, context):
 		row = self.layout.row()
@@ -1148,19 +1053,20 @@ class C3WorldPanel(bpy.types.Panel):
 		self.layout.prop(context.world, 'c3_export_opt')
 		self.layout.prop(context.world, 'c3_export_html')
 
-		self.layout.operator("c3.export_wasm", icon="CONSOLE")
-		self.layout.operator("c3.export", icon="CONSOLE")
+		self.layout.operator('c3.export_wasm', icon = 'CONSOLE')
+		self.layout.operator('c3.export', icon = 'CONSOLE')
 		if _BUILD_INFO['native-size']:
-			self.layout.label(text="exe KB=%s" %( _BUILD_INFO['native-size']//1024 ))
+			self.layout.label(text = 'exe KB=%s' %( _BUILD_INFO['native-size']//1024 ))
 
 @bpy.utils.register_class
-class JS13KB_Panel(bpy.types.Panel):
+class JS13KB_Panel (bpy.types.Panel):
 	bl_idname = "WORLD_PT_JS13KB_Panel"
 	bl_label = "js13kgames.com"
 	bl_space_type = "PROPERTIES"
 	bl_region_type = "WINDOW"
 	bl_context = "world"
-	def draw(self, context):
+
+	def draw (self, context):
 		self.layout.prop(context.world, 'c3_js13kb')
 		row = self.layout.row()
 		row.prop(context.world, 'c3_miniapi')
@@ -1168,24 +1074,23 @@ class JS13KB_Panel(bpy.types.Panel):
 		if context.world.c3_js13kb:
 			self.layout.prop(context.world, 'c3_export_zip')
 			if _BUILD_INFO['zip-size']:
-				self.layout.label(text=_BUILD_INFO['zip'])
+				self.layout.label(text = _BUILD_INFO['zip'])
 				if _BUILD_INFO['zip-size'] <= 1024*13:
-					self.layout.label(text="zip bytes=%s" %( _BUILD_INFO['zip-size'] ))
+					self.layout.label(text = "zip bytes=%s" %( _BUILD_INFO['zip-size'] ))
 				else:
-					self.layout.label(text="zip KB=%s" %( _BUILD_INFO['zip-size']//1024 ))
+					self.layout.label(text = "zip KB=%s" %( _BUILD_INFO['zip-size']//1024 ))
 
-				self.layout.label(text='html-size=%s' % _BUILD_INFO['html-size'])
-				self.layout.label(text='jslib-size=%s' % _BUILD_INFO['jslib-size'])
-				self.layout.label(text='jslib-gz-size=%s' % _BUILD_INFO['jslib-gz-size'])
+				self.layout.label(text = 'html-size=%s' % _BUILD_INFO['html-size'])
+				self.layout.label(text = 'jslib-size=%s' % _BUILD_INFO['jslib-size'])
+				self.layout.label(text = 'jslib-gz-size=%s' % _BUILD_INFO['jslib-gz-size'])
 
 		if _BUILD_INFO['wasm-size']:
 			if _BUILD_INFO['wasm-size'] < 1024*16:
-				self.layout.label(text="wasm bytes=%s" %( _BUILD_INFO['wasm-size'] ))
+				self.layout.label(text = "wasm bytes=%s" %( _BUILD_INFO['wasm-size'] ))
 			else:
-				self.layout.label(text="wasm KB=%s" %( _BUILD_INFO['wasm-size']//1024 ))
+				self.layout.label(text = "wasm KB=%s" %( _BUILD_INFO['wasm-size']//1024 ))
 
-
-def build_linux(world):
+def build_linux (world):
 	global WORLD
 	WORLD = world
 	o = blender_to_c3(world)
@@ -1193,7 +1098,7 @@ def build_linux(world):
 	#print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
-	bin = build(input=tmp, opt=world.c3_export_opt)
+	bin = build(input = tmp, opt = world.c3_export_opt)
 	return bin
 
 JS_DECOMP = '''
@@ -1213,7 +1118,6 @@ $d($0,1).then((j)=>{
 	});
 });
 '''
-
 JS_LIB_COLOR_HELPERS = '''
 function color_hex_unpacked(r,g,b,a){
 	r=r.toString(16).padStart(2,'0');
@@ -1227,7 +1131,6 @@ function getColorFromMemory(buf,ptr){
 	return color_hex_unpacked(r,g,b,a)
 }
 '''
-
 JS_LIB_API_ENV = '''
 function make_environment(e){
 	return new Proxy(e,{
@@ -1238,7 +1141,6 @@ function make_environment(e){
 	});
 }
 '''
-
 JS_LIB_API_ENV_MINI = '''
 function make_environment(e){
 	return new Proxy(e,{
@@ -1246,7 +1148,6 @@ function make_environment(e){
 	});
 }
 '''
-
 JS_LIB_API = '''
 function cstrlen(m,p){
 	var l=0;
@@ -1296,7 +1197,6 @@ c3dom_api = {
 		return this.elts.push(e)-1
 	}
 	''',
-
 	'html_css_string':'''
 	html_css_string(idx,a,b){
 		a=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,a);
@@ -1309,34 +1209,26 @@ c3dom_api = {
 		this.elts[idx].style[a]=b
 	}
 	''',
-
-
 	'html_set_text':'''
 	html_set_text(idx,ptr){
 		this.elts[idx].firstChild.nodeValue=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
 	}
 	''',
-
 	'html_add_char':'''
 	html_add_char(idx,c){
 		this.elts[idx].append(String.fromCharCode(c))
 	}
 	''',
-
-
 	'html_css_scale':'''
 	html_css_scale(idx,z){
 		this.elts[idx].style.transform='scale('+z+')'
 	}
 	''',
-
 	'html_css_scale_y':'''
 	html_css_scale_y(idx,z){
 		this.elts[idx].style.transform='scaleY('+z+')'
 	}
 	''',
-
-
 	'html_set_position':'''
 	html_set_position(idx,x,y){
 		var elt = this.elts[idx];
@@ -1344,13 +1236,11 @@ c3dom_api = {
 		elt.style.top = y
 	}
 	''',
-
 	'html_css_zindex':'''
 	html_css_zindex(idx,z){
 		this.elts[idx].style.zIndex=z
 	}
 	''',
-
 	'html_bind_onclick':'''
 	html_bind_onclick(idx,f,oidx){
 		var elt=this.elts[idx];
@@ -1361,30 +1251,23 @@ c3dom_api = {
 		}
 	}
 	''',
-
-
 	'html_eval':'''
 	html_eval(ptr){
 		var _=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr);
 		eval(_)
 	}
 	''',
-
-
 	'html_canvas_clear':'''
 	html_canvas_clear(){
 		this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height)
 	}
 	''',
-
 	'html_canvas_resize' : '''
 	html_canvas_resize(w,h){
 		this.canvas.width=w;
 		this.canvas.height=h
 	}
 	''',
-
-
 	'wasm_memory':'''
 	wasm_memory(idx){
 		return this.bytes[idx]
@@ -1395,16 +1278,12 @@ c3dom_api = {
 		return this.bytes.length
 	}
 	''',
-
 	'random':'''
 	random(){
 		return Math.random()
 	}
 	''',
-
-
 }
-
 raylib_like_api = {
 	'raylib_js_set_entry':'''
 	_(f){
@@ -1530,7 +1409,7 @@ def gen_mini_api():
 			raylib_like_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
 			#raylib_like_api_mini[fname] = {'sym':nxt,'code':code.replace('\t','')}
 		else:
-			## hard coded syms
+			# hard coded syms
 			sym = code.split('(')[0]
 			raylib_like_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
 
@@ -1637,7 +1516,6 @@ def gen_js_api(world, c3, user_methods):
 def gen_html (world, wasm, c3, user_html = None, background = '', user_methods = {}, debug = '--debug' in sys.argv):
 	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', wasm ]
 	print(cmd)
-	
 	subprocess.check_call(cmd)
 	
 	wa = open(wasm,'rb').read()
@@ -1646,9 +1524,8 @@ def gen_html (world, wasm, c3, user_html = None, background = '', user_methods =
 	jtmp = '/tmp/c3api.js'
 	jslib = gen_js_api(world, c3, user_methods)
 	open(jtmp,'w').write(jslib)
-	cmd = ['gzip', '--keep', '--force', '--verbose', '--best', jtmp]
+	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', jtmp ]
 	print(cmd)
-
 	subprocess.check_call(cmd)
 	
 	js = open(jtmp + '.gz', 'rb').read()
@@ -1662,7 +1539,7 @@ def gen_html (world, wasm, c3, user_html = None, background = '', user_methods =
 			'<canvas id=$><script>',
 			'$1="%s"' % b,
 			'$0="%s"' % jsb,
-			#JS_DECOMP.replace('\t','').replace('var ', '').replace('\n',''), ## breaks invalid canvas above
+			#JS_DECOMP.replace('\t','').replace('var ', '').replace('\n',''), # breaks invalid canvas above
 			JS_DECOMP.replace('\t','').replace('var ', ''), 
 			'</script>',
 		]
@@ -1715,20 +1592,19 @@ def wasm_opt (wasm):
 	o = wasm.replace('.wasm', '.opt.wasm')
 	cmd = [ 'wasm-opt', '-o',o, '-Oz', wasm ]
 	print(cmd)
-	
 	subprocess.check_call(cmd)
 	 
 	return o
 
 SERVER_PROC = None
 WORLD = None
-def build_wasm( world ):
+def build_wasm (world):
 	global SERVER_PROC, WORLD
 	WORLD = world
 	if SERVER_PROC: SERVER_PROC.kill()
 	user_html = []
 	user_methods = {}
-	o = blender_to_c3(world, wasm=True, html=user_html, methods=user_methods)
+	o = blender_to_c3(world, wasm = True, html = user_html, methods = user_methods)
 	o = '\n'.join(o)
 	#print(o)
 	tmp = '/tmp/c3blender.c3'
@@ -1740,40 +1616,34 @@ def build_wasm( world ):
 			b = raylib_like_api_mini[fname]['sym']
 			raylib = raylib.replace('@extern("%s")' %fname, '@extern("%s")' % b)
 		open(rtmp,'w').write(raylib)
-		wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt, raylib=rtmp)
+		wasm = build(input = tmp, wasm=True, opt = world.c3_export_opt, raylib = rtmp)
 	else:
-		wasm = build(input=tmp, wasm=True, opt=world.c3_export_opt)
-
+		wasm = build(input = tmp, wasm = True, opt = world.c3_export_opt)
 	wasm = wasm_opt(wasm)
-
 	_BUILD_INFO['wasm']=wasm
 	_BUILD_INFO['wasm-size']=len(open(wasm,'rb').read())
-
-	#os.system('cp -v ./index.html /tmp/.')
-	#os.system('cp -v ./raylib.js /tmp/.')
-	html = gen_html(world, wasm, o, user_html, user_methods=user_methods)
+	html = gen_html(world, wasm, o, user_html, user_methods = user_methods)
 	open('/tmp/index.html', 'w').write(html)
 	if world.c3_js13kb:
 		if os.path.isfile('/usr/bin/zip'):
 			cmd = ['zip', '-9', 'index.html.zip', 'index.html']
 			print(cmd)
 			subprocess.check_call(cmd, cwd='/tmp')
+
 			zip = open('/tmp/index.html.zip','rb').read()
 			_BUILD_INFO['zip-size'] = len(zip)
-
 			if world.c3_export_zip:
 				out = os.path.expanduser(world.c3_export_zip)
-				if not out.endswith('.zip'): out += '.zip'
+				if not out.endswith('.zip'):
+					out += '.zip'
 				_BUILD_INFO['zip'] = out
 				print('saving:', out)
 				open(out,'wb').write(zip)
 			else:
 				_BUILD_INFO['zip'] = '/tmp/index.html.zip'
-
 		else:
-			if len(html.encode('utf-8')) > 1024*13:
+			if len(html.encode('utf-8')) > 1024 * 13:
 				raise SyntaxError('final html is over 13KB')
-
 	if WASM_OBJDUMP:
 		cmd = [WASM_OBJDUMP, '--syms', wasm]
 		print(cmd)
@@ -1784,122 +1654,120 @@ def build_wasm( world ):
 		print('saving:', out)
 		open(out,'w').write(html)
 		webbrowser.open(out)
+
 	else:
-		cmd = ['python', '-m', 'http.server', '6969']
-		SERVER_PROC = subprocess.Popen(cmd, cwd='/tmp')
-		atexit.register(lambda:SERVER_PROC.kill())
+		cmd = [ 'python', '-m', 'http.server', '6969' ]
+		SERVER_PROC = subprocess.Popen(cmd, cwd = '/tmp')
+
+		atexit.register(lambda: SERVER_PROC.kill())
 		webbrowser.open('http://localhost:6969')
+
 	return wasm
 
-bpy.types.Material.c3_export_trifan = bpy.props.BoolProperty(name="triangle fan")
-bpy.types.Material.c3_export_tristrip = bpy.props.BoolProperty(name="triangle strip")
+bpy.types.Material.c3_export_trifan = bpy.props.BoolProperty(name = 'triangle fan')
+bpy.types.Material.c3_export_tristrip = bpy.props.BoolProperty(name = 'triangle strip')
 
-bpy.types.World.c3_export_res_x = bpy.props.IntProperty(name="resolution X", default=800)
-bpy.types.World.c3_export_res_y = bpy.props.IntProperty(name="resolution Y", default=600)
-bpy.types.World.c3_export_scale = bpy.props.FloatProperty(name="scale", default=100)
-bpy.types.World.c3_export_offset_x = bpy.props.IntProperty(name="offset X", default=100)
-bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name="offset Y", default=100)
+bpy.types.World.c3_export_res_x = bpy.props.IntProperty(name = 'resolution X', default = 800)
+bpy.types.World.c3_export_res_y = bpy.props.IntProperty(name = 'resolution Y', default = 600)
+bpy.types.World.c3_export_scale = bpy.props.FloatProperty(name = 'scale', default = 100)
+bpy.types.World.c3_export_offset_x = bpy.props.IntProperty(name = 'offset X', default = 100)
+bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name = 'offset Y', default = 100)
 
-bpy.types.World.c3_export_html = bpy.props.StringProperty(name="c3 export (.html)")
-bpy.types.World.c3_export_zip = bpy.props.StringProperty(name="c3 export (.zip)")
-bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name="c3 minifiy js/wasm api calls")
-bpy.types.World.c3_js13kb = bpy.props.BoolProperty(name="js13k: error on export if output is over 13KB")
-bpy.types.World.c3_invalid_html = bpy.props.BoolProperty(name="save space with invalid html wrapper")
+bpy.types.World.c3_export_html = bpy.props.StringProperty(name = 'c3 export (.html)')
+bpy.types.World.c3_export_zip = bpy.props.StringProperty(name = 'c3 export (.zip)')
+bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name = 'c3 minifiy js/wasm api calls')
+bpy.types.World.c3_js13kb = bpy.props.BoolProperty(name = 'js13k: error on export if output is over 13KB')
+bpy.types.World.c3_invalid_html = bpy.props.BoolProperty(name = 'save space with invalid html wrapper')
 
 bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
-	name='optimize',
-	items=[
-		("O0", "O0", "Safe, no optimizations, emit debug info."), 
-		("O1", "O1", "Safe, high optimization, emit debug info."), 
-		("O2", "O2", "Unsafe, high optimization, emit debug info."), 
-		("O3", "O3", "Unsafe, high optimization, single module, emit debug info."), 
-		("O4", "O4", "Unsafe, highest optimization, relaxed maths, single module, emit debug info, no panic messages."),
-		("O5", "O5", "Unsafe, highest optimization, fast maths, single module, emit debug info, no panic messages, no backtrace."),
-		("Os", "Os", "Unsafe, high optimization, small code, single module, no debug info, no panic messages."),
-		("Oz", "Oz", "Unsafe, high optimization, tiny code, single module, no debug info, no panic messages, no backtrace."),
+	name = 'optimize',
+	items = [
+		('O0', 'O0', 'Safe, no optimizations, emit debug info.'), 
+		('O1', 'O1', 'Safe, high optimization, emit debug info.'), 
+		('O2', 'O2', 'Unsafe, high optimization, emit debug info.'), 
+		('O3', 'O3', 'Unsafe, high optimization, single module, emit debug info.'), 
+		('O4', 'O4', 'Unsafe, highest optimization, relaxed maths, single module, emit debug info, no panic messages.'),
+		('O5', 'O5', 'Unsafe, highest optimization, fast maths, single module, emit debug info, no panic messages, no backtrace.'),
+		('Os', 'Os', 'Unsafe, high optimization, small code, single module, no debug info, no panic messages.'),
+		('Oz', 'Oz', 'Unsafe, high optimization, tiny code, single module, no debug info, no panic messages, no backtrace.'),
 	]
 )
 
-bpy.types.GreasePencilv3.c3_grease_optimize = bpy.props.IntProperty(name="grease pencil optimize", min=0, max=8)
+bpy.types.GreasePencilv3.c3_grease_optimize = bpy.props.IntProperty(name = 'grease pencil optimize', min = 0, max = 8)
 bpy.types.GreasePencilv3.c3_grease_quantize = bpy.props.EnumProperty(
-	name='quantize',
-	items=[
-		("32bits", "32bits", "32bit vertices"), 
-		("16bits", "16bits", "16bit vertices"), 
-		("8bits", "8bits", "8bit vertices"), 
-		#("7x5x4bits", "7x5x4bits", "vertices(7bits, 7bits, 5bits, 5bits, 4bits, 4bits)"), 
-		("7bits", "7bits", "vertex chunk(8bits, 8bits, 4bits, 4bits, 4bits, 4bits)"), 
-		("6bits", "6bits", "vertex chunk(6bits, 6bits, 5bits, 5bits, 5bits, 5bits)"), 
-		("4bits", "4bits", "4bit vertices"), 
+	name = 'quantize',
+	items = [
+		('32bits', '32bits', '32bit vertices'), 
+		('16bits', '16bits', '16bit vertices'), 
+		('8bits', '8bits', '8bit vertices'), 
+		('7bits', '7bits', 'vertex chunk(8bits, 8bits, 4bits, 4bits, 4bits, 4bits)'), 
+		('6bits', '6bits', 'vertex chunk(6bits, 6bits, 5bits, 5bits, 5bits, 5bits)'), 
+		('4bits', '4bits', '4bit vertices'), 
 	]
 )
 
-bpy.types.Object.c3_hide     = bpy.props.BoolProperty( name="hidden on spawn")
-bpy.types.Object.c3_onclick     = bpy.props.PointerProperty( name="on click script", type=bpy.types.Text)
-bpy.types.Object.c3_script_init = bpy.props.PointerProperty( name="init script", type=bpy.types.Text)
+bpy.types.Object.c3_hide = bpy.props.BoolProperty(name = 'hidden on spawn')
+bpy.types.Object.c3_onclick = bpy.props.PointerProperty(name = 'on click script', type = bpy.types.Text)
+bpy.types.Object.c3_script_init = bpy.props.PointerProperty(name = 'init script', type = bpy.types.Text)
 
 for i in range(MAX_SCRIPTS_PER_OBJECT):
 	setattr(
 		bpy.types.Object,
-		"c3_script" + str(i),
-		bpy.props.PointerProperty(name="script%s" % i, type=bpy.types.Text),
+		'c3_script' + str(i),
+		bpy.props.PointerProperty(name = 'script%s' % i, type = bpy.types.Text),
 	)
 	setattr(
 		bpy.types.Object,
-		"c3_method" + str(i),
-		bpy.props.PointerProperty(name="method%s" % i, type=bpy.types.Text),
+		'c3_method' + str(i),
+		bpy.props.PointerProperty(name = 'method%s' % i, type = bpy.types.Text),
 	)
 	setattr(
 		bpy.types.Object,
-		"c3_script%s_disable" %i,
-		bpy.props.BoolProperty(name="disable"),
+		'c3_script%s_disable' %i,
+		bpy.props.BoolProperty(name = 'disable'),
 	)
 
 for i in range(MAX_OBJECTS_PER_TEXT):
 	setattr(
 		bpy.types.Text,
-		"object" + str(i),
-		bpy.props.PointerProperty(name="object%s" % i, type=bpy.types.Object),
+		'object' + str(i),
+		bpy.props.PointerProperty(name='object%s' % i, type = bpy.types.Object),
 	)
 	setattr(
 		bpy.types.Text,
-		"color" + str(i),
-		bpy.props.FloatVectorProperty(name="color%s" % i, subtype='COLOR'),
+		'color' + str(i),
+		bpy.props.FloatVectorProperty(name='color%s' % i, subtype = 'COLOR'),
 	)
 	setattr(
 		bpy.types.Text,
-		"c3_functions" + str(i),
-		bpy.props.PointerProperty(name="function script%s" % i, type=bpy.types.Text),
+		'c3_functions' + str(i),
+		bpy.props.PointerProperty(name='function script%s' % i, type = bpy.types.Text),
 	)
 	setattr(
 		bpy.types.Text,
-		"c3_init" + str(i),
-		bpy.props.PointerProperty(name="init script%s" % i, type=bpy.types.Text),
+		'c3_init' + str(i),
+		bpy.props.PointerProperty(name='init script%s' % i, type = bpy.types.Text),
 	)
 
-bpy.types.Text.c3_extern = bpy.props.StringProperty(name="fn extern")
+bpy.types.Text.c3_extern = bpy.props.StringProperty(name = 'fn extern')
 
-
-def macro_pointers(txt, object=None, v2arrays={}):
+def macro_pointers (txt, object = None, v2arrays = {}):
 	t = txt.as_string()
 	for i in range(MAX_OBJECTS_PER_TEXT):
 		tag = 'object%s' % i
 		ob = getattr(txt, tag)
-		if '$'+tag+'.' in t:
+		if '$' + tag + '.' in t:
 			if not ob:
 				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
-			#t = t.replace('$'+tag+'.', 'objects[%s_id].' % safename(ob))
-			t = t.replace('$'+tag+'.', 'objects[%s_ID].' % safename(ob).upper())
+			t = t.replace('$' + tag + '.', 'objects[%s_ID].' % safename(ob).upper())
 		elif '$'+tag in t:
 			if not ob:
 				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
-			t = t.replace('$'+tag, ob.name)  ## only works inside of quotes in html dom
-
+			t = t.replace('$' + tag, ob.name)  # only works inside of quotes in html dom
 		tag = 'color%s' % i
 		clr = getattr(txt, tag)
-		if '$'+tag in t:
+		if '$' + tag in t:
 			t = t.replace('$'+tag, ','.join([str(v) for v in clr]))
-
 	o = []
 	for ln in t.splitlines():
 		if ln.startswith('$Vector2'):
@@ -1912,99 +1780,93 @@ def macro_pointers(txt, object=None, v2arrays={}):
 				if '$'+name in ln:
 					ln = ln.replace('$'+name, '%s_%s' % (name, safename(object)))
 			o.append(ln)
-
 	return '\n'.join(o)
 
 @bpy.utils.register_class
 class C3ScriptsPanel(bpy.types.Panel):
-	bl_idname = "OBJECT_PT_C3_Scripts_Panel"
-	bl_label = "C3 Script Pointers"
-	bl_space_type = "TEXT_EDITOR"
-	bl_region_type = "UI"
-	def draw(self, context):
+	bl_idname = 'OBJECT_PT_C3_Scripts_Panel'
+	bl_label = 'C3 Script Pointers'
+	bl_space_type = 'TEXT_EDITOR'
+	bl_region_type = 'UI'
+
+	def draw (self, context):
 		txt = context.space_data.text
 		if txt:
-			self.layout.label(text=txt.name)
+			self.layout.label(text = txt.name)
 		else:
-			self.layout.label(text="(no text)")
+			self.layout.label(text = '(no text)')
 			return
-
 		if txt.name.endswith(')'):
 			self.layout.prop(txt, 'c3_extern')
-
-		self.layout.label(text="object pointers")
+		self.layout.label(text = 'object pointers')
 		for i in range(MAX_OBJECTS_PER_TEXT):
 			self.layout.prop(txt, 'object%s' % i)
-
-		self.layout.label(text="color pointers")
+		self.layout.label(text = 'color pointers')
 		for i in range(MAX_OBJECTS_PER_TEXT):
 			self.layout.prop(txt, 'color%s' % i)
-
-		self.layout.label(text="include functions")
+		self.layout.label(text = 'include functions')
 		for i in range(MAX_OBJECTS_PER_TEXT):
 			self.layout.prop(txt, 'c3_functions%s' % i)
-
-		self.layout.label(text="initialize scripts")
+		self.layout.label(text = 'initialize scripts')
 		for i in range(MAX_OBJECTS_PER_TEXT):
 			self.layout.prop(txt, 'c3_init%s' % i)
 
-
 @bpy.utils.register_class
 class C3ObjectPanel(bpy.types.Panel):
-	bl_idname = "OBJECT_PT_C3_Object_Panel"
-	bl_label = "C3 Object Options"
-	bl_space_type = "PROPERTIES"
-	bl_region_type = "WINDOW"
-	bl_context = "object"
+	bl_idname = 'OBJECT_PT_C3_Object_Panel'
+	bl_label = 'C3 Object Options'
+	bl_space_type = 'PROPERTIES'
+	bl_region_type = 'WINDOW'
+	bl_context = 'object'
 
-	def draw(self, context):
-		if not context.active_object: return
+	def draw (self, context):
+		if not context.active_object:
+			return
 		ob = context.active_object
-		if ob.type=='GPENCIL':
+		if ob.type == 'GPENCIL':
 			self.layout.prop(ob.data, 'c3_grease_optimize')
 			self.layout.prop(ob.data, 'c3_grease_quantize')
-
-		self.layout.prop(ob, "c3_hide")
-		self.layout.prop(ob, "c3_onclick")
-
-		self.layout.label(text="Attach C3 Scripts")
-		self.layout.prop(ob, "c3_script_init")
+		self.layout.prop(ob, 'c3_hide')
+		self.layout.prop(ob, 'c3_onclick')
+		self.layout.label(text = 'Attach C3 Scripts')
+		self.layout.prop(ob, 'c3_script_init')
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			hasProperty = (
-				getattr(ob, "c3_script" + str(i)) != None
+				getattr(ob, 'c3_script' + str(i)) != None
 			)
 			if hasProperty or not foundUnassignedScript:
 				row = self.layout.row()
-				row.prop(ob, "c3_script" + str(i))
-				row.prop(ob, "c3_script%s_disable"%i)
+				row.prop(ob, 'c3_script' + str(i))
+				row.prop(ob, 'c3_script%s_disable'%i)
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
-
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			hasProperty = (
-				getattr(ob, "c3_method" + str(i)) != None
+				getattr(ob, 'c3_method' + str(i)) != None
 			)
 			if hasProperty or not foundUnassignedScript:
-				self.layout.prop(ob, "c3_method" + str(i))
+				self.layout.prop(ob, 'c3_method' + str(i))
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 
-
 @bpy.utils.register_class
 class C3MaterialPanel(bpy.types.Panel):
-	bl_idname = "OBJECT_PT_C3_Material_Panel"
-	bl_label = "C3 Material Settings"
-	bl_space_type = "PROPERTIES"
-	bl_region_type = "WINDOW"
-	bl_context = "material"
+	bl_idname = 'OBJECT_PT_C3_Material_Panel'
+	bl_label = 'C3 Material Settings'
+	bl_space_type = 'PROPERTIES'
+	bl_region_type = 'WINDOW'
+	bl_context = 'material'
 
-	def draw(self, context):
-		if not context.active_object: return
+	def draw (self, context):
+		if not context.active_object:
+			return
 		ob = context.active_object
-		if not ob.type=='GPENCIL': return
-		if not ob.data.materials: return
+		if not ob.type == 'GPENCIL':
+			return
+		if not ob.data.materials:
+			return
 		mat = ob.data.materials[ ob.active_material_index ]
 		self.layout.prop(mat, 'c3_export_trifan')
 		self.layout.prop(mat, 'c3_export_tristrip')
@@ -2019,7 +1881,7 @@ if __name__=='__main__':
 		elif arg.startswith('--test='):
 			test = arg.split('=')[-1]
 		elif arg.startswith('--O'):
-			bpy.data.worlds[0].c3_export_opt = arg[2:]
+			bpy.data.worlds[0].c3_export_opt = arg[2 :]
 		elif arg.startswith('--output='):
 			bpy.data.worlds[0].c3_export_html = arg.split('=')[-1]
 		elif arg=='--minifiy':
@@ -2029,15 +1891,15 @@ if __name__=='__main__':
 			bpy.data.worlds[0].c3_js13kb = True
 			bpy.data.worlds[0].c3_invalid_html = True
 	for ob in bpy.data.objects:
-		if ob.type == 'MESH':
+		if ob.type in [ 'MESH', 'CURVE' ] and len(ob.material_slots) > 0:
 			ob.material_slots[0].material.use_nodes = False
 	if '--test' in sys.argv or test:
 		import c3blendgen
 		if test:
-			getattr(c3blendgen,test)(q,o)
+			getattr(c3blendgen, test)(q, o)
 		else:
-			c3blendgen.gen_test_scene(q,o)
+			c3blendgen.gen_test_scene (q, o)
 	if '--wasm' in sys.argv:
-		build_wasm( bpy.data.worlds[0] )
+		build_wasm (bpy.data.worlds[0])
 	elif '--linux' in sys.argv:
-		build_linux( bpy.data.worlds[0] )
+		build_linux (bpy.data.worlds[0])
