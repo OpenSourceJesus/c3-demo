@@ -33,12 +33,12 @@ if not os.path.isfile(C3):
 				subprocess.check_call(cmd.split())
 			elif c3zip and isWindows:
 				if not os.path.isfile('c3-windows.zip'):
-					cmd = ['C:/Windows/System32/curl.exe', '-o', 'c3-windows.zip', c3zip]
+					cmd = [ 'C:/Windows/System32/curl.exe', '-o', 'c3-windows.zip', c3zip ]
 					print(cmd)
 					subprocess.check_call(cmd)
 			elif c3zip:
 				if not os.path.isfile('c3-macos.zip'):
-					cmd = ['curl', '-o', 'c3-macos.zip', c3zip]
+					cmd = [ 'curl', '-o', 'c3-macos.zip', c3zip ]
 					print(cmd)
 					subprocess.check_call(cmd)
 
@@ -67,18 +67,18 @@ else:
 	# WASM_OBJDUMP = os.path.join(EMSDK, 'upstream/bin/llvm-objdump')
 	WASM_OBJDUMP = ''
 
-def c3_wasm_strip(wasm):
+def C3ToWasmStrip (wasm):
 	#a = b'.rodata\x00,\x0ftarget_features\x02+\x0fmutable-globals+\x08sign-ext' # wasm-opt: parse exception: Section extends beyond end of input
 	a = b'\x00,\x0ftarget_features\x02+\x0fmutable-globals+\x08sign-ext'
 	b = open(wasm,'rb').read()
 	print(b)
 	assert b.endswith(a)
-	c = b[:-len(a)]
+	c = b[: -len(a)]
 	print(c)
 	open(wasm,'wb').write(c)
 
 
-def build (input = './demo.c3', output = 'demo', wasm = '--wasm' in sys.argv, opt = '--opt' in sys.argv, run = True, raylib = './raylib.c3'):
+def Build (input = './demo.c3', output = 'demo', wasm = '--wasm' in sys.argv, opt = '--opt' in sys.argv, run = True, raylib = './raylib.c3'):
 	cmd = [C3]
 	if wasm:
 		cmd += [ '--target', 'wasm32' ]
@@ -114,7 +114,7 @@ def build (input = './demo.c3', output = 'demo', wasm = '--wasm' in sys.argv, op
 	if wasm:
 		w = '/tmp/%s.wasm' % output
 		if C3_STRIP_TAIL:
-			c3_wasm_strip(w)
+			C3ToWasmStrip(w)
 		return w
 	else:
 		return '/tmp/%s' % output
@@ -124,12 +124,12 @@ try:
 except:
 	bpy = None
 
-if __name__=='__main__':
+if __name__ == '__main__':
 	if bpy:
 		pass
 	elif '--c3demo' in sys.argv:
 		# runs simple test without blender
-		build()
+		Build()
 		sys.exit()
 
 	else:
@@ -138,7 +138,7 @@ if __name__=='__main__':
 			if arg.endswith('.blend'):
 				cmd.append(arg)
 				break
-		cmd += [ '--python-exit-code', '1', '--python', __file__ ]
+		cmd += [  '--python-exit-code', '1', '--python', __file__ ]
 		exargs = []
 		for arg in sys.argv:
 			if arg.startswith('--'):
@@ -161,6 +161,7 @@ if not bpy:
 	else:
 		print('download blender from: https://blender.org')
 	sys.exit()
+
 HEADER = '''
 import raylib;
 def Entry = fn void();
@@ -206,6 +207,7 @@ HEADER_OBJECT = '''
 struct Object {
 	Vector2 position;
 	Vector2 velocity;
+	float rotation;
 	Vector2 scale;
 	Color color;
 	int id;
@@ -257,24 +259,25 @@ MAIN = '''
 	raylib::close_window();
 '''
 
-def is_maybe_circle(ob):
+def IsCircle (ob):
 	if len(ob.data.vertices) == 32 and len(ob.data.polygons) == 1:
 		return True
 	else:
 		return False
 
-def safename(ob):
+def GetSafeName (ob):
 	return ob.name.lower().replace('.', '_')
 
 WASM_EXTERN = '''
 extern fn void html_css_string (int id, char *key, char *val) @extern("html_css_string");
 extern fn void html_css_int (int id, char *key, int val) @extern("html_css_int");
 
-
 extern fn float random () @extern("random");
 
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
+
+extern fn void draw_svg (Vector2* position, float rotation, Vector2* size, bool hide, Vector2* points, int pointCount, Vector2* leftHandles, Vector2* rightHandles, float depth, bool cyclic, bool fill, Color* color) @extern("DrawSvg");
 
 extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
 extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
@@ -297,31 +300,39 @@ extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
 '''
 
-def get_scripts (ob):
+def GetScripts (ob):
 	scripts = []
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
 		if getattr(ob, "c3_script%s_disable" %i):
 			continue
 		txt = getattr(ob, "c3_script" + str(i))
 		if txt != None:
-			scripts.append(macro_pointers(txt, ob))
+			scripts.append(MacroPointers(txt, ob))
 	return scripts
 
-def has_scripts (ob):
+def HasScripts (ob):
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
 		txt = getattr(ob, "c3_script" + str(i))
 		if txt != None:
 			return True
 	return False
 
-def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods = {}):
+def BlenderVectorToC3 (v, is2d : bool = False):
+	if is2d:
+		return '{' + str(v.x) + ', ' + str(v.y) + '}'
+	else:
+		return '{' + str(v.x) + ', ' + str(v.y) + ', ' + str(v.z) + '}'
+
+DEFAULT_COLOR = [ 0.5, 0.5, 0.5, 1 ]
+
+def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {}):
 	resx = world.c3_export_res_x
 	resy = world.c3_export_res_y
 	SCALE = world.c3_export_scale
 	offX = world.c3_export_offset_x
 	offY = world.c3_export_offset_y
 	unpackers = {}
-	head  = [HEADER, HEADER_OBJECT]
+	head  = [ HEADER, HEADER_OBJECT ]
 	if wasm:
 		head.append(HEADER_OBJECT_WASM)
 		if world.c3_miniapi:
@@ -353,7 +364,7 @@ def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods =
 			if itxt and itxt.name not in main_init:
 				main_init[itxt.name]=itxt
 				setup.append(itxt.as_string())
-	draw_header = [
+	drawHeader = [
 		'fn void game_frame() @extern("$") @wasm {',
 	]
 	draw  = [
@@ -366,7 +377,7 @@ def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods =
 		draw.append('	html_canvas_clear();')
 	else:
 		draw.append('	raylib::begin_drawing();')
-		draw.append('	raylib::clear_background({0xFF, 0xFF, 0xFF, 0xFF});')
+		draw.append('	raylib::clear_background({ 0xFF, 0xFF, 0xFF, 0xFF });')
 	global_v2arrays = {}
 	meshes = []
 	curves = []
@@ -377,23 +388,23 @@ def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods =
 		if ob.hide_get():
 			continue
 		print(ob)
-		sname = safename(ob)
-		x,y,z = ob.location * SCALE
+		sname = GetSafeName(ob)
+		x, y, z = ob.location * SCALE
 		z = -z
 		x += offX
 		z += offY
 		sx, sy, sz = ob.scale * SCALE
-		idx = len(meshes)
-		if ob.type in ('MESH', 'GPENCIL', 'FONT'):
+		idx = len(meshes + curves)
+		if ob.type in ( 'MESH', 'GREASEPENCIL', 'CURVE', 'FONT' ):
 			if not ob.name.startswith('_'):
 				#head.append('short %s_id=%s;' % (sname,idx))
-				head.append('const short %s_ID=%s;' % (sname.upper(),idx))
+				head.append('const short %s_ID = %s;' % (sname.upper(), idx))
 		scripts = []
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			txt = getattr(ob, "c3_script" + str(i))
 			if txt:
 				if not getattr(ob, "c3_script%s_disable" %i):
-					scripts.append(macro_pointers(txt, ob, global_v2arrays))
+					scripts.append(MacroPointers(txt, ob, global_v2arrays))
 			txt = getattr(ob, "c3_method" + str(i))
 			if txt and txt.name not in methods:
 				tname = txt.name
@@ -405,54 +416,55 @@ def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods =
 					exdef = 'fn ' + exdef
 				if not exdef.startswith('extern'):
 					exdef = 'extern ' + exdef
-				if not exdef.endswith(';'): exdef += ';'
+				if not exdef.endswith(';'):
+					exdef += ';'
 				args_def = exdef.split('@')[0].split('(')[-1].split(')')[0]
-				assert fname+'(' in exdef
-				exdef = exdef.replace(fname+'(', '%s(int _eltid,' % fname)
+				assert fname + '(' in exdef
+				exdef = exdef.replace(fname + '(', '%s(int _eltid,' %fname)
 				head.append(exdef)
-				args = args[:-1] # strip )
+				args = args[: -1] # strip )
 				head += [
 
-					'fn void Object.%s(Object *_obj, %s) {' % (fname, args_def),
-					'	%s(_obj.id, %s);' % (fname, args),
+					'fn void Object.%s(Object *_obj, %s) {' %(fname, args_def),
+					'	%s(_obj.id, %s);' %(fname, args),
 					'}', 
 				]
 				if '@extern("' in txt.c3_extern:
 					tname = txt.c3_extern.split('@extern("')[-1].split('"')[0]
-					if len(tname) <= 1:
+					if len(tname) < 2:
 						print(txt)
-						raise SyntaxError('@extern names must be at least two characters: %s' % txt.c3_extern)
+						raise SyntaxError('@extern names must be at least two characters: %s' %txt.c3_extern)
 					tname += '(' + txt.name.split('(')[-1]
-				methods[tname] = macro_pointers(txt, ob, global_v2arrays)
-		if ob.type=="MESH":
+				methods[tname] = MacroPointers(txt, ob, global_v2arrays)
+		if ob.type == "MESH":
 			meshes.append(ob)
-			setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
-			setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
+			setup.append('	objects[%s].position = {%s,%s};' % (idx, x, z))
+			setup.append('	objects[%s].scale = {%s,%s};' % (idx, sx, sz))
 			#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
 			if len(ob.material_slots) > 0:
 				materialColor = ob.material_slots[0].material.diffuse_color
 			else:
-				materialColor = [ 0.5, 0.5, 0.5 ]
-			setup.append('	objects[%s].color={%s,%s,%s,0xFF};' % (idx, int(materialColor[0] * 255), int(materialColor[1] * 255), int(materialColor[2] * 255) ))
-			draw.append('	self = objects[%s]; //MESH<:%s' % (idx, ob.name) )
+				materialColor = DEFAULT_COLOR
+			setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, int(materialColor[0] * 255), int(materialColor[1] * 255), int(materialColor[2] * 255) ))
+			draw.append('	self = objects[%s]; //MESH: %s' % (idx, ob.name) )
 			if scripts:
 				props = {}
 				for prop in ob.keys():
-					if prop.startswith( ('_', 'c3_') ): continue
+					if prop.startswith(( '_', 'c3_' )): continue
 					#head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
-					head.append('float %s_%s = %s;' %(prop,sname, ob[prop]))
+					head.append('float %s_%s = %s;' %(prop, sname, ob[prop]))
 					props[prop] = ob[prop]
 				# user C3 scripts
 				for s in scripts:
 					for prop in props:
-						if 'self.'+prop in s:
+						if 'self.' + prop in s:
 							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
-							s = s.replace('self.'+prop, '%s_%s'%(prop,sname))
+							s = s.replace('self.' + prop, '%s_%s'%(prop, sname))
 					draw.append('\t' + s)
 				# save object state: from stack back to heap
-				draw.append('	objects[%s] = self; //MESH>:%s' % (idx,ob.name))
-			if ob.display_type in ('TEXTURED', 'SOLID'):
-				if is_maybe_circle(ob):
+				draw.append('	objects[%s] = self; //MESH: %s' % (idx, ob.name))
+			if ob.display_type in ( 'TEXTURED', 'SOLID' ):
+				if IsCircle(ob):
 					rad = ob.data.vertices[0].co.y
 					if not rad:
 						for v in ob.data.vertices:
@@ -460,36 +472,64 @@ def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods =
 						print('WARN: not a circle? %s' % ob.name)
 						rad = 1.0
 					if wasm:
-						#draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x, self.color);')
-						draw.append('	draw_circle_wasm((int)self.position.x,(int)self.position.y, self.scale.x*%s, self.color);' % rad)
+						#draw.append('	draw_circle_wasm((int)self.position.x,(int) self.position.y, self.scale.x, self.color);')
+						draw.append('	draw_circle_wasm((int) self.position.x,(int) self.position.y, self.scale.x * %s, self.color);' % rad)
 					else:
 						#draw.append('	raylib::draw_circle_v(self.position, self.scale.x, self.color);')
-						draw.append('	raylib::draw_circle_v(self.position, self.scale.x*%s, self.color);' % rad)
+						draw.append('	raylib::draw_circle_v(self.position, self.scale.x * %s, self.color);' % rad)
 				else:
 					draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
-		elif ob.type=='GREASEPENCIL':
+		elif ob.type == 'GREASEPENCIL':
 			meshes.append(ob)
-			if has_scripts(ob):
-				setup.append('	objects[%s].position={%s,%s};' % (idx, x,z))
-				sx,sy,sz = ob.scale
-				setup.append('	objects[%s].scale={%s,%s};' % (idx, sx,sz))
+			if HasScripts(ob):
+				setup.append('	objects[%s].position = {%s, %s};' % (idx, x, z))
+				sx, sy, sz = ob.scale
+				setup.append('	objects[%s].scale = {%s, %s};' % (idx, sx, sz))
 			if wasm:
-				grease_to_c3_wasm(ob, datas, head, draw, setup, scripts, idx)
+				GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, idx)
 			else:
-				grease_to_c3_raylib(ob, datas, head, draw, setup)
+				GreaseToC3Raylib (ob, datas, head, draw, setup)
 		elif ob.type == 'CURVE':
 			curves.append(ob)
-		elif ob.type=='FONT' and wasm:
-			cscale = ob.data.size*SCALE
+			setup.append('	objects[%s].position = {%s, %s};' % (idx, x, y))
+			setup.append('	objects[%s].rotation = %s;' % (idx, ob.rotation_euler.z))
+			setup.append('	objects[%s].scale = {%s, %s};' % (idx, sx, sy))
+			if len(ob.material_slots) > 0:
+				materialColor = ob.material_slots[0].material.diffuse_color
+			else:
+				materialColor = DEFAULT_COLOR
+			setup.append('	objects[%s].color = {%s, %s, %s, 0xFF};' % ( idx, int(materialColor[0] * 255), int(materialColor[1] * 255), int(materialColor[2] * 255) ))
+			if ob.c3_hide:
+				setup.append('	objects[%s].hide = true;' %idx)
+			spline = ob.data.splines[0]
+			points = spline.bezier_points
+			pointsStr = '{ '
+			leftHandlesStr = '{ '
+			rightHandlesStr = '{ '
+			for point in points:
+				pointsStr += BlenderVectorToC3(point.co, True) + ', '
+				leftHandlesStr += BlenderVectorToC3(point.handle_left, True) + ', '
+				rightHandlesStr += BlenderVectorToC3(point.handle_right, True) + ', '
+			pointsStr += '} '
+			leftHandlesStr += '} '
+			rightHandlesStr += '} '
+			cyclicStr = str(spline.use_cyclic_u).lower()
+			fillStr = str(ob.data.fill_mode != 'None').lower()
+			head.append('Vector2[] points_%s = %s;' %( sname, pointsStr ))
+			head.append('Vector2[] leftHandles_%s = %s;' %( sname, leftHandlesStr ))
+			head.append('Vector2[] rightHandles_%s = %s;' %( sname, rightHandlesStr ))
+			setup.append('	draw_svg(&(objects[%s].position), objects[%s].rotation, &(objects[%s].scale), objects[%s].hide, (Vector2*) &%s, %s, (Vector2*) &%s, (Vector2*) &%s, %s, %s, %s, &(objects[%s].color));' %( idx, idx, idx, idx, 'points_' + sname, len(points), 'leftHandles_' + sname, 'rightHandles_' + sname, ob.data.bevel_depth, cyclicStr, fillStr, idx ))
+		elif ob.type == 'FONT' and wasm:
+			cscale = ob.data.size * SCALE
 			if use_html:
-				css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %(x+(cscale*0.1),z-cscale, cscale)
+				css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %(x + (cscale * 0.1),z - cscale, cscale)
 				div = '<div id="%s" style="%s">%s</div>' %(sname, css, ob.data.body)
 				html.append(div)
 				continue
 			meshes.append(ob)
 			hide = 'false'
 			if ob.c3_hide:
-				setup.append('	objects[%s].hide=true;' % idx)
+				setup.append('	objects[%s].hide = true;' %idx)
 				hide = 'true'
 			if ob.parent:
 				x, y, z = ob.location * SCALE
@@ -497,89 +537,87 @@ def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods =
 			dom_name = ob.name
 			if dom_name.startswith('_'):
 				dom_name = ''
-			if ob.parent and has_scripts(ob.parent):
+			if ob.parent and HasScripts(ob.parent):
 				setup += [
-					'	objects[%s].position={%s,%s};' % (idx, x+(cscale*0.1),z-(cscale*1.8)),
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, x+(cscale*0.1),z-(cscale*1.8), cscale, hide, dom_name),
+					'	objects[%s].position = {%s, %s};' % (idx, x + (cscale * 0.1), z - (cscale * 1.8)),
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name),
 				]
 			elif ob.parent:
-				fx = x+(cscale*0.1)
-				fy = z-(cscale*1.8)
+				fx = x + (cscale * 0.1)
+				fy = z - (cscale * 1.8)
 				fx += (ob.parent.location.x * SCALE) + offX
 				fy += (ob.parent.location.z * SCALE) + offY
 				setup += [
 					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, fx,fy, cscale, hide, dom_name),
 				]
 			else:
-				fx = x+(cscale*0.1)
-				fy = z-(cscale*1.8)
+				fx = x + (cscale * 0.1)
+				fy = z - (cscale * 1.8)
 				setup += [
 					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, fx,fy, cscale, hide, dom_name),
 				]
-
 			if ob.scale.y != 1.0:
 				setup += [
 					'	objects[%s].css_scale_y(%s);' % (idx, ob.scale.y),
 				]
-
 			if ob.c3_onclick:
-				tname = safename(ob.c3_onclick)
+				tname = GetSafeName(ob.c3_onclick)
 				if wasm and ascii_letters:
 					head += [
-						'fn void _onclick_%s(int _index_) @extern("%s") {' % (tname,ascii_letters.pop()),
+						'fn void _onclick_%s(int _index_) @extern("%s") {' % ( tname, ascii_letters.pop() ),
 						'	Object self = objects[_index_];',
-						macro_pointers(ob.c3_onclick, ob, global_v2arrays),
+						MacroPointers(ob.c3_onclick, ob, global_v2arrays),
 						'}',
 					]
 				else:
 					head += [
 						'fn void _onclick_%s(int _index_){' % tname,
 						'	Object self = objects[_index_];',
-						macro_pointers(ob.c3_onclick, ob, global_v2arrays),
+						MacroPointers(ob.c3_onclick, ob, global_v2arrays),
 						'}',
 					]
 				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
 			if ob.location.y >= 0.1:
-				setup.append('	html_css_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y*10)))
+				setup.append('	html_css_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y * 10)))
 			elif ob.location.y <= -0.1:
-				setup.append('	html_css_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y*10))) )
+				setup.append('	html_css_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y * 10))) )
 			# slightly bigger than using html_css_zindex
 			#if ob.location.y >= 0.1:
 			#	setup.append('	html_css_int(objects[%s].id,"zIndex",-%s);' % (idx, int(ob.location.y*10)))
 			#elif ob.location.y <= -0.1:
 			#	setup.append('	html_css_int(objects[%s].id,"zIndex", %s);' % (idx, abs(int(ob.location.y*10))) )
-			if scripts or (ob.parent and has_scripts(ob.parent)):
-				draw.append('	self = objects[%s]; // %s' % (idx,ob.name))
+			if scripts or (ob.parent and HasScripts(ob.parent)):
+				draw.append('	self = objects[%s]; // %s' % (idx, ob.name))
 			if scripts:
 				props = {}
 				for prop in ob.keys():
 					if prop.startswith( ('_', 'c3_') ): continue
 					#head.append('float %s_%s = %s;' %(sname, prop, ob[prop])) 
 					# Error: A letter must precede any digit `__001` (object copy in blender renames with .00N)
-					if ob[prop]==0:
-						head.append('float %s_%s;' %(prop,sname))
+					if ob[prop] == 0:
+						head.append('float %s_%s;' %(prop, sname))
 					else:
-						head.append('float %s_%s = %s;' %(prop,sname, ob[prop]))
+						head.append('float %s_%s = %s;' %(prop, sname, ob[prop]))
 					props[prop] = ob[prop]
 				# user C3 scripts
 				for s in scripts:
 					for prop in props:
-						if 'self.'+prop in s:
+						if 'self.' + prop in s:
 							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
-							s = s.replace('self.'+prop, '%s_%s'%(prop,sname))
+							s = s.replace('self.' + prop, '%s_%s'%(prop, sname))
 					draw.append('\t' + s)
-			if ob.parent and has_scripts(ob.parent):
+			if ob.parent and HasScripts(ob.parent):
 				if prevparent != ob.parent.name:
 					prevparent = ob.parent.name
-					#draw.append('parent = objects[%s_id];' % safename(ob.parent))
-					draw.append('parent = objects[%s_ID];' % safename(ob.parent).upper())
+					#draw.append('parent = objects[%s_id];' % GetSafeName(ob.parent))
+					draw.append('parent = objects[%s_ID];' % GetSafeName(ob.parent).upper())
 				draw += [
-					#'parent = objects[%s_id];' % safename(ob.parent),
+					#'parent = objects[%s_id];' % GetSafeName(ob.parent),
 					#'self.position.x=parent.position.x;',
 					#'self.position.y=parent.position.y;',
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
 				]
-		if ob.type in ('MESH', 'GPENCIL', 'FONT'):
+		if ob.type in ( 'MESH', 'GREASEPENCIL', 'CURVE', 'FONT' ):
 			if not ob.name.startswith('_'):
 				if ob.c3_script_init:
 					setup += ['	{',
@@ -595,11 +633,11 @@ def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods =
 		setup.append(MAIN % (resx, resy))
 	setup.append('}')
 	if 'self' in '\n'.join(draw):
-		draw_header.append('	Object self;')
+		drawHeader.append('	Object self;')
 	if 'parent' in '\n'.join(draw):
-		draw_header.append('	Object parent;')
+		drawHeader.append('	Object parent;')
 	if 'delta_time' in '\n'.join(draw):
-		draw_header.append('	float delta_time = raylib::get_frame_time();')
+		drawHeader.append('	float delta_time = raylib::get_frame_time();')
 	if not wasm:
 		draw.append('	raylib::end_drawing();')
 	draw.append('}')
@@ -610,58 +648,59 @@ def blender_to_c3 (world, wasm = False, html = None, use_html = False, methods =
 	for dname in datas:
 		print(dname)
 		print('orig-points:', datas[dname]['orig-points'])
-		print('total-points:',datas[dname]['total-points'])
-	return head + setup + draw_header + draw
+		print('total-points:', datas[dname]['total-points'])
+	return head + setup + drawHeader + draw
 
-def grease_to_c3_wasm (ob, datas, head, draw, setup, scripts, obIndex):
+def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 	SCALE = WORLD.c3_export_scale
 	offX = WORLD.c3_export_offset_x
 	offY = WORLD.c3_export_offset_y
-	sx,sy,sz = ob.scale * SCALE
-	x,y,z = ob.location * SCALE
-	dname = safename(ob.data)
+	sx, sy, sz = ob.scale * SCALE
+	x, y, z = ob.location * SCALE
+	dname = GetSafeName(ob.data)
 	gquant = False
 	if ob.data.c3_grease_quantize != '32bits':
 		gquant = ob.data.c3_grease_quantize
 	gopt = ob.data.c3_grease_optimize
 	if dname not in datas:
-		datas[dname]={'orig-points':0, 'total-points':0, 'draw':[]}
+		datas[dname] = { 'orig-points' : 0, 'total-points' : 0, 'draw' : [] }
 		data = []
-		for lidx, layer in enumerate( ob.data.layers ):
-			for sidx, stroke in enumerate( layer.frames[0].drawing.strokes ):
+		for lidx, layer in enumerate(ob.data.layers):
+			for sidx, stroke in enumerate(layer.frames[0].drawing.strokes):
 				datas[dname]['orig-points'] += len(stroke.points)
 				mat = ob.data.materials[stroke.material_index]
 				use_fill = 0
-				if mat.grease_pencil.show_fill: use_fill = 1
+				if mat.grease_pencil.show_fill:
+					use_fill = 1
 				if gopt:
 					points = []
 					for pidx in range(0, len(stroke.points), gopt):
-						points.append( stroke.points[pidx] )
+						points.append(stroke.points[pidx])
 				else:
 					points = stroke.points
 				s = []
 				if gquant:
-					qstroke = quantizer(points, gquant)
+					qstroke = Quantizer(points, gquant)
 					n = len(qstroke['points'])
 					if not len(qstroke['points']):
 						print('stroke quantized away:', stroke)
 						continue
 					datas[dname]['total-points'] += len(qstroke['points'])
-					x0,y0,z0 = points[0].position
+					x0, y0,z0 = points[0].position
 					q = qstroke['q']
 					qs = qstroke['qs']
 					setup += [
-						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname,lidx,sidx),
-						'	&__%s__%s_%s,' %(dname,lidx,sidx),
+						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname, lidx, sidx),
+						'	&__%s__%s_%s,' %(dname, lidx, sidx),
 						'	%s,' % n,
-						'	%s, %s' % (x0*q, z0*q),
+						'	%s, %s' % (x0 * q, z0 * q),
 						');',
 					]
-					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
+					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant, n, dname, lidx, sidx, ','.join(qstroke['points'])))
 					if gquant in ('6bits', '7bits'):
-						data.append('Vector2[%s] __%s__%s_%s;' % ( (n*3),dname, lidx, sidx ))
+						data.append('Vector2[%s] __%s__%s_%s;' % ( (n * 3), dname, lidx, sidx ))
 					else:
-						data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
+						data.append('Vector2[%s] __%s__%s_%s;' % (n + 1, dname, lidx, sidx ))
 						n += 1
 				else:
 					# default 32bit floats #
@@ -669,46 +708,47 @@ def grease_to_c3_wasm (ob, datas, head, draw, setup, scripts, obIndex):
 					if scripts:
 						for pnt in points:
 							x1,y1,z1 = pnt.position * SCALE
-							s.append('{%s,%s}' % (x1,-z1))
+							s.append('{%s,%s}' % (x1, -z1))
 					else:
 						for pnt in points:
-							x1,y1,z1 = pnt.position
+							x1, y1, z1 = pnt.position
 							x1 *= sx
 							z1 *= sz
-							s.append('{%s,%s}' % (x1+offX+x,-z1+offY+z))
-					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(points),dname, lidx, sidx, ','.join(s) ))
+							s.append('{%s,%s}' % (x1 + offX + x, -z1 + offY + z))
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(points), dname, lidx, sidx, ','.join(s)))
 					n = len(s)
 				if gquant in ('6bits', '7bits'):
 					nn = n*3
 				else:
 					nn = n
-				r,g,b,a = mat.grease_pencil.fill_color
-				swidth = calc_stroke_width(stroke)
-				datas[dname]['draw'].append({'layer':lidx, 'index':sidx, 'length':nn, 'width':swidth, 'fill':use_fill, 'color':[r, g, b, a]})
+				r, g, b, a = mat.grease_pencil.fill_color
+				swidth = GetStrokeWidth(stroke)
+				datas[dname]['draw'].append({'layer' : lidx, 'index' : sidx, 'length' : nn, 'width' : swidth, 'fill' : use_fill, 'color' : [r, g, b, a]})
 		head += data
 		if gquant:
 			if gquant in ('6bits', '7bits'):
-				head += gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offX, offY)
+				head += GetDeltaDeltaUnpacker(ob, dname, gquant, SCALE, qs, offX, offY)
 			else:
-				head += gen_delta_unpacker(ob, dname, gquant, SCALE, qs, offX, offY)
-	oname = sname = safename(ob)
+				head += GetDeltaUnpacker(ob, dname, gquant, SCALE, qs, offX, offY)
+	oname = sname = GetSafeName(ob)
 	if scripts:
 		draw.append('	self = objects[%s];' % obIndex)
 		props = {}
 		for prop in ob.keys():
-			if prop.startswith( ('_', 'c3_') ): continue
+			if prop.startswith( ('_', 'c3_') ):
+				continue
 			head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
 			props[prop] = ob[prop]
 		# user C3 scripts
 		for s in scripts:
 			for prop in props:
-				if 'self.'+prop in s:
-					s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
+				if 'self.' + prop in s:
+					s = s.replace('self.' + prop, '%s_%s'%(sname,prop))
 			draw.append('\t' + s)
 		# save object state: from stack back to heap
 		draw.append('	objects[%s] = self; // %s' % (obIndex, ob.name))
 	for a in datas[dname]['draw']:
-		r,g,b,alpha = a['color']
+		r, g, b, alpha = a['color']
 		r = int(r * 255)
 		g = int(g * 255)
 		b = int(b * 255)
@@ -720,46 +760,44 @@ def grease_to_c3_wasm (ob, datas, head, draw, setup, scripts, obIndex):
 				draw.append('	draw_spline_wasm(&__%s__%s_%s,%s,%s, 0, 0,0,0,0);' % (dname, a['layer'], a['index'], a['length'], a['width']))
 		else:
 			tag = [oname, a['layer'], a['index']]
-			head.append('Vector2[%s] _%s_%s_%s;' % tuple([a['length']]+tag) )
+			head.append('Vector2[%s] _%s_%s_%s;' % tuple([a['length']] + tag) )
 			dtag = [dname, a['layer'], a['index']]
 			draw += [
-				'	transform_spline_wasm(&__%s__%s_%s, &_%s_%s_%s, %s, objects[%s].position, objects[%s].scale);' %tuple(dtag+tag+[a['length'], obIndex, obIndex]),
+				'	transform_spline_wasm(&__%s__%s_%s, &_%s_%s_%s, %s, objects[%s].position, objects[%s].scale);' %tuple(dtag + tag + [ a['length'], obIndex, obIndex ]),
 				'	draw_spline_wasm(&_%s_%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (oname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r, g, b, alpha)
 			]
 
-def gen_delta_delta_unpacker(ob, dname, gquant, SCALE, qs, offX, offY):
-	x,y,z = ob.location * SCALE
-	sx,sy,sz = ob.scale
+def GetDeltaDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
+	x, y, z = ob.location * SCALE
+	sx, sy, sz = ob.scale
 	gkey = (dname, gquant)
 	# TODO only gen single packer per quant
 	qkey = gquant.split('bit')[0]
 	return [
 		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0) @extern("u%s") {' %(dname, gquant, qkey),
 		'	int j=0;',
-		'	out[0].x = (x0*%sf) + %sf;' %(qs*sx, offX+x),
-		'	out[0].y = -(z0*%sf) + %sf;'  % (qs*sz, offY+z),
+		'	out[0].x = (x0*%sf) + %sf;' %(qs * sx, offX + x),
+		'	out[0].y = -(z0*%sf) + %sf;'  % (qs * sz, offY + z),
 		'	for (int i=0; i<len; i++){',
-		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs*sx, offX+x),
-		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' % (qs*sz, offY+z),
+		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs * sx, offX + x),
+		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' % (qs * sz, offY + z),
 
 		'		j++;',
 		'		out[j].x = ax;',
 		'		out[j].y = ay;',
 
 		'		j++;',
-		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x1)) * %sf) + %sf;' % (qs*sx, offX+x),
-		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y1)) * %sf) + %sf;' % (qs*sz, offY+z),
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x1)) * %sf) + %sf;' % (qs * sx, offX + x),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y1)) * %sf) + %sf;' % (qs * sz, offY + z),
 
 		'		j++;',
-		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' % (qs*sx, offX+x),
-		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' % (qs*sz, offY+z),
-
-
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' % (qs * sx, offX + x),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' % (qs * sz, offY + z),
 		'	}',
 		'}'
 	]
 
-def gen_delta_unpacker (ob, dname, gquant, SCALE, qs, offX, offY):
+def GetDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
 	x, y, z = ob.location * SCALE
 	sx, sy, sz = ob.scale
 	gkey = (dname, gquant)
@@ -776,13 +814,13 @@ def gen_delta_unpacker (ob, dname, gquant, SCALE, qs, offX, offY):
 		'}'
 	]
 
-def grease_to_c3_raylib (ob, datas, head, draw, setup):
+def GreaseToC3Raylib (ob, datas, head, draw, setup):
 	SCALE = WORLD.c3_export_scale
 	offX = WORLD.c3_export_offset_x
 	offY = WORLD.c3_export_offset_y
 	sx, sy, sz = ob.scale * SCALE
 	x, y, z = ob.location * SCALE
-	dname = safename(ob.data)
+	dname = GetSafeName(ob.data)
 	gquant = False
 	if ob.data.c3_grease_quantize != '32bits':
 		gquant = ob.data.c3_grease_quantize
@@ -798,10 +836,10 @@ def grease_to_c3_raylib (ob, datas, head, draw, setup):
 				s = []
 				if use_fill:
 					if mat.c3_export_trifan:
-						x1,y1,z1 = calc_center(stroke.points)
+						x1,y1,z1 = GetCenter(stroke.points)
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' % (x1+offX+x,-z1+offY+z))
+						s.append('{%s,%s}' % (x1 + offX + x, -z1 + offY + z))
 					elif mat.c3_export_tristrip:
 						tri_strip = True
 					else:
@@ -811,31 +849,31 @@ def grease_to_c3_raylib (ob, datas, head, draw, setup):
 							tris.append(tri.v2)
 							tris.append(tri.v3)
 						tris = ','.join([str(vidx) for vidx in tris])
-						data.append('int[%s] __%s__%s_%s_tris = {%s};' % (len(stroke.triangles)*3,dname, lidx, sidx, tris ))
+						data.append('int[%s] __%s__%s_%s_tris = {%s};' % ( len(stroke.triangles)*3,dname, lidx, sidx, tris ))
 					# default 32bit floats #
 					for pnt in stroke.points:
 						x1,y1,z1 = pnt.position
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' % (x1+offX+x,-z1+offY+z))
+						s.append('{%s,%s}' % (x1 + offX + x, -z1 + offY + z))
 					n = len(s)
 					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (n, dname, lidx, sidx, ','.join(s) ))
 				elif gquant:
-					qstroke = quantizer(stroke.points, gquant)
+					qstroke = Quantizer(stroke.points, gquant)
 					n = len(qstroke['points'])
 					if not len(qstroke['points']):
 						print('stroke quantized away:', stroke)
 						continue
 					data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
-					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
+					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % ( gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
 					x0, y0, z0 = stroke.points[0].position
 					q = qstroke['q']
 					qs = qstroke['qs']
 					setup += [
-						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname,lidx,sidx),
-						'	&__%s__%s_%s,' %(dname,lidx,sidx),
-						'	%s,' % len(stroke.points),
-						'	%s, %s' % (x0*q, z0*q),
+						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname, lidx, sidx),
+						'	&__%s__%s_%s,' %(dname, lidx, sidx),
+						'	%s,' % len(stroke. points),
+						'	%s, %s' % (x0 * q, z0 * q),
 						');',
 					]
 				else:
@@ -845,11 +883,11 @@ def grease_to_c3_raylib (ob, datas, head, draw, setup):
 						x1,y1,z1 = pnt.position
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' % (x1+offX+x,-z1+offY+z))
-					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(stroke.points),dname, lidx, sidx, ','.join(s) ))
+						s.append('{%s,%s}' % (x1 + offX + x, -z1 + offY + z))
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' % ( len(stroke.points),dname, lidx, sidx, ','.join(s) ))
 					n = len(s)
 				r, g, b, a = mat.grease_pencil.fill_color
-				swidth = calc_stroke_width(stroke)
+				swidth = GetStrokeWidth(stroke)
 				if use_fill:
 					clr = '{%s,%s,%s,%s}' % (int(r * 255), int(g * 255), int(b * 255), int(a * 255))
 					if mat.c3_export_trifan:
@@ -890,13 +928,13 @@ def grease_to_c3_raylib (ob, datas, head, draw, setup):
 				'}'
 			]
 
-def quantizer (points, quant, trim = True):
+def Quantizer (points, quant, trim = True):
 	SCALE = WORLD.c3_export_scale
 	s = []
 	if quant == '4bits':
 		q = SCALE * 0.125
 		qs = 8
-	elif quant == '6bits' or quant=='7bits':
+	elif quant == '6bits' or quant == '7bits':
 		q = SCALE * 0.5
 		qs = 2
 	elif quant == '8bits' or quant == "7x5x4bits":
@@ -911,7 +949,7 @@ def quantizer (points, quant, trim = True):
 		x1,y1,z1 = pnt.position
 		dx = int((x0 - x1) * q)
 		dz = int((z0 - z1) * q)
-		if quant=='4bits':
+		if quant == '4bits':
 			if dx > 7:
 				print('WARN: 4bit vertex clip x=', dx)
 				dx = 7
@@ -924,7 +962,7 @@ def quantizer (points, quant, trim = True):
 			elif dz < -8:
 				print('WARN: 4bit vertex clip z=', dz)
 				dz = -8
-		elif quant=='6bits':
+		elif quant == '6bits':
 			if dx >= 32:
 				print('WARN: 6bit vertex clip x=', dx)
 				dx = 31
@@ -978,7 +1016,7 @@ def quantizer (points, quant, trim = True):
 		s.append('{%s}' % ', '.join('%s,%s' % v for v in mvec))
 	return { 'q' : q, 'qs' : qs, 'points' : s }
 
-def calc_stroke_width (stroke):
+def GetStrokeWidth (stroke):
 	sw = 0.0
 	for p in stroke.points:
 		sw += p.radius
@@ -986,7 +1024,7 @@ def calc_stroke_width (stroke):
 	sw /= len(stroke.points)
 	return sw * stroke.softness * 0.05
 
-def calc_center (points):
+def GetCenter (points):
 	ax = ay = az = 0.0
 	for p in points:
 		ax += p.position.x
@@ -1016,7 +1054,7 @@ class C3Export(bpy.types.Operator):
 		return True
 
 	def execute (self, context):
-		exe = build_linux(context.world)
+		exe = BuildLinux(context.world)
 		_BUILD_INFO['native'] = exe
 		_BUILD_INFO['native-size'] = len(open(exe, 'rb').read())
 		return {'FINISHED'}
@@ -1031,7 +1069,7 @@ class C3Export(bpy.types.Operator):
 		return True
 
 	def execute (self, context):
-		exe = build_wasm(context.world)
+		exe = BuildWasm(context.world)
 		return {'FINISHED'}
 
 @bpy.utils.register_class
@@ -1079,26 +1117,24 @@ class JS13KB_Panel (bpy.types.Panel):
 					self.layout.label(text = "zip bytes=%s" %( _BUILD_INFO['zip-size'] ))
 				else:
 					self.layout.label(text = "zip KB=%s" %( _BUILD_INFO['zip-size']//1024 ))
-
 				self.layout.label(text = 'html-size=%s' % _BUILD_INFO['html-size'])
 				self.layout.label(text = 'jslib-size=%s' % _BUILD_INFO['jslib-size'])
 				self.layout.label(text = 'jslib-gz-size=%s' % _BUILD_INFO['jslib-gz-size'])
-
 		if _BUILD_INFO['wasm-size']:
 			if _BUILD_INFO['wasm-size'] < 1024*16:
 				self.layout.label(text = "wasm bytes=%s" %( _BUILD_INFO['wasm-size'] ))
 			else:
 				self.layout.label(text = "wasm KB=%s" %( _BUILD_INFO['wasm-size']//1024 ))
 
-def build_linux (world):
+def BuildLinux (world):
 	global WORLD
 	WORLD = world
-	o = blender_to_c3(world)
+	o = BlenderToC3(world)
 	o = '\n'.join(o)
 	#print(o)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(o)
-	bin = build(input = tmp, opt = world.c3_export_opt)
+	bin = Build(input = tmp, opt = world.c3_export_opt)
 	return bin
 
 JS_DECOMP = '''
@@ -1119,7 +1155,7 @@ $d($0,1).then((j)=>{
 });
 '''
 JS_LIB_COLOR_HELPERS = '''
-function color_hex_unpacked(r,g,b,a){
+function color_hex_unpacked(r, g, b, a){
 	r=r.toString(16).padStart(2,'0');
 	g=g.toString(16).padStart(2,'0');
 	b=b.toString(16).padStart(2,'0');
@@ -1127,8 +1163,8 @@ function color_hex_unpacked(r,g,b,a){
 	return "#"+r+g+b+a
 }
 function getColorFromMemory(buf,ptr){
-	const [r,g,b,a]=new Uint8Array(buf,ptr,4);
-	return color_hex_unpacked(r,g,b,a)
+	const [r, g, b, a]=new Uint8Array(buf,ptr,4);
+	return color_hex_unpacked(r, g, b, a)
 }
 '''
 JS_LIB_API_ENV = '''
@@ -1155,9 +1191,10 @@ function cstrlen(m,p){
 	return l;
 }
 
-function cstr_by_ptr(m,p){
-	const l=cstrlen(new Uint8Array(m),p);
-	const b=new Uint8Array(m,p,l);
+function cstr_by_ptr (m, p)
+{
+	const l = cstrlen(new Uint8Array(m), p);
+	const b = new Uint8Array(m, p, l);
 	return new TextDecoder().decode(b)
 }
 
@@ -1184,64 +1221,64 @@ class api{
 		});
 	}
 '''
-
 c3dom_api = {
 	'html_new_text' : '''
-	html_new_text(ptr,r,g,b,h,id){
-		var e=document.createElement('pre');
-		e.style='position:absolute;left:'+r+';top:'+g+';font-size:'+b;
-		e.hidden=h;
-		e.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,id);
+	html_new_text(ptr, r, g, b, h, id)
+	{
+		var e = document.createElement('pre');
+		e.style = 'position:absolute;left:' + r + '; top:' + g + ; font-size:' + b;
+		e.hidden = h;
+		e.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer, id);
 		document.body.append(e);
-		e.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr));
-		return this.elts.push(e)-1
+		e.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr));
+		return this.elts.push(e) - 1
 	}
 	''',
-	'html_css_string':'''
+	'html_css_string' : '''
 	html_css_string(idx,a,b){
 		a=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,a);
 		this.elts[idx].style[a]=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,b)
 	}
 	''',
-	'html_css_int':'''
+	'html_css_int' : '''
 	html_css_int(idx,a,b){
 		a=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,a);
 		this.elts[idx].style[a]=b
 	}
 	''',
-	'html_set_text':'''
+	'html_set_text' : '''
 	html_set_text(idx,ptr){
 		this.elts[idx].firstChild.nodeValue=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
 	}
 	''',
-	'html_add_char':'''
+	'html_add_char' : '''
 	html_add_char(idx,c){
 		this.elts[idx].append(String.fromCharCode(c))
 	}
 	''',
-	'html_css_scale':'''
+	'html_css_scale' : '''
 	html_css_scale(idx,z){
 		this.elts[idx].style.transform='scale('+z+')'
 	}
 	''',
-	'html_css_scale_y':'''
+	'html_css_scale_y' : '''
 	html_css_scale_y(idx,z){
 		this.elts[idx].style.transform='scaleY('+z+')'
 	}
 	''',
-	'html_set_position':'''
+	'html_set_position' : '''
 	html_set_position(idx,x,y){
 		var elt = this.elts[idx];
 		elt.style.left = x;
 		elt.style.top = y
 	}
 	''',
-	'html_css_zindex':'''
+	'html_css_zindex' : '''
 	html_css_zindex(idx,z){
 		this.elts[idx].style.zIndex=z
 	}
 	''',
-	'html_bind_onclick':'''
+	'html_bind_onclick' : '''
 	html_bind_onclick(idx,f,oidx){
 		var elt=this.elts[idx];
 		elt._onclick_=this.wasm.instance.exports.__indirect_function_table.get(f);
@@ -1251,13 +1288,13 @@ c3dom_api = {
 		}
 	}
 	''',
-	'html_eval':'''
+	'html_eval' : '''
 	html_eval(ptr){
 		var _=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr);
 		eval(_)
 	}
 	''',
-	'html_canvas_clear':'''
+	'html_canvas_clear' : '''
 	html_canvas_clear(){
 		this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height)
 	}
@@ -1268,24 +1305,24 @@ c3dom_api = {
 		this.canvas.height=h
 	}
 	''',
-	'wasm_memory':'''
+	'wasm_memory' : '''
 	wasm_memory(idx){
 		return this.bytes[idx]
 	}
 	''',
-	'wasm_size':'''
+	'wasm_size' : '''
 	wasm_size(){
 		return this.bytes.length
 	}
 	''',
-	'random':'''
+	'random' : '''
 	random(){
 		return Math.random()
 	}
 	''',
 }
 raylib_like_api = {
-	'raylib_js_set_entry':'''
+	'raylib_js_set_entry' : '''
 	_(f){
 		this.entryFunction=this.wasm.instance.exports.__indirect_function_table.get(f)
 	}
@@ -1297,22 +1334,22 @@ raylib_like_api = {
 		document.title=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
 	}
 	''',
-	'GetScreenWidth':'''
+	'GetScreenWidth' : '''
 	GetScreenWidth(){
 		return this.canvas.width
 	}
 	''',
-	'GetScreenHeight':'''
+	'GetScreenHeight' : '''
 	GetScreenHeight(){
 		return this.canvas.height
 	}
 	''',
-	'GetFrameTime':'''
+	'GetFrameTime' : '''
 	GetFrameTime(){
 		return Math.min(this.dt,1/30/2)
 	}
 	''',
-	'DrawRectangleV':'''
+	'DrawRectangleV' : '''
 	DrawRectangleV(pptr,sptr,cptr){
 		const buf=this.wasm.instance.exports.memory.buffer;
 		const p=new Float32Array(buf,pptr,2);
@@ -1321,8 +1358,8 @@ raylib_like_api = {
 		this.ctx.fillRect(p[0],p[1],s[0],s[1])
 	}
 	''',
-	'DrawSplineLinearWASM':'''
-	DrawSplineLinearWASM(ptr,l,t,fill,r,g,b,a){
+	'DrawSplineLinearWASM' : '''
+	DrawSplineLinearWASM(ptr,l,t,fill,r, g, b, a){
 		const buf=this.wasm.instance.exports.memory.buffer;
 		const p=new Float32Array(buf,ptr,l*2);
 		this.ctx.strokeStyle='black';
@@ -1330,7 +1367,8 @@ raylib_like_api = {
 		this.ctx.lineWidth=t;
 		this.ctx.beginPath();
 		this.ctx.moveTo(p[0],p[1]);
-		for(var i=2;i<p.length;i+=2)this.ctx.lineTo(p[i],p[i+1]);
+		for(var i=2;i<p.length;i+=2)
+			this.ctx.lineTo(p[i],p[i+1]);
 		if(fill){
 			this.ctx.closePath();
 			this.ctx.fill()
@@ -1338,30 +1376,63 @@ raylib_like_api = {
 		this.ctx.stroke()
 	}
 	''',
-	'DrawCircleWASM':'''
+	'DrawCircleWASM' : '''
 	DrawCircleWASM(x,y,rad,ptr){
 		const buf=this.wasm.instance.exports.memory.buffer;
-		const [r,g,b,a]=new Uint8Array(buf, ptr, 4);
+		const [r, g, b, a]=new Uint8Array(buf, ptr, 4);
 		this.ctx.strokeStyle = 'black';
 		this.ctx.beginPath();
 		this.ctx.arc(x,y,rad,0,2*Math.PI,false);
-		this.ctx.fillStyle = color_hex_unpacked(r,g,b,a);
+		this.ctx.fillStyle = color_hex_unpacked(r, g, b, a);
 		this.ctx.closePath();
 		this.ctx.stroke()
 	}
 	''',
-	'ClearBackground':'''
+	'DrawSvg' : '''
+	DrawSvg (position, rotation, size, hide, points, pointCount, leftHandles, rightHandles, depth, cyclic, fill, color)
+	{
+		const buf = this.wasm.instance.exports.memory.buffer;
+		const position_ = new Float32Array(buf, position, 2);
+		const size_ = new Float32Array(buf, size, 2);
+		const points_ = new Float32Array(buf, points, pointCount * 2);
+		const leftHandles_ = new Float32Array(buf, leftHandles, pointCount * 2);
+		const rightHandles_ = new Float32Array(buf, rightHandles, pointCount * 2);
+		const [ r, g, b, a ] = new Uint8Array(buf, color, 4);
+		var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		svg.setAttribute('hidden', hide);
+		svg.setAttribute('viewBox', '0 0 ' + size_[0] + ' ' + size_[1]);
+		svg.setAttribute('x', position_[0] - size_[0] / 2);
+		svg.setAttribute('y', position_[1] - size_[1] / 2);
+		svg.setAttribute('width', '' + size_[0]);
+		svg.setAttribute('height', '' + size_[1]);
+		var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+		var pathStr = 'M'+ points_[0] + ' ' + points_[1];
+		for (var i = 2; i < points_.length; i += 2)
+			pathStr += 'C' + leftHandles_[i] + ' ' + leftHandles_[i + 1] + ' ' + rightHandles_[i] + ' ' + rightHandles_[i + 1] + ' ' + points_[i] + ' ' + points_[i + 1];
+		path.setAttribute('d', pathStr);
+		var lineColor = color_hex_unpacked(r, g, b, a);
+		if (fill)
+			var fillColor = lineColor;
+		else
+			var fillColor = 'transparent';
+		path.setAttribute('stroke', lineColor);
+		path.setAttribute('fill', fillColor);
+		svg.appendChild(path);
+		document.body.append(svg);
+	}
+	''',
+	'ClearBackground' : '''
 	ClearBackground(ptr) {
 		this.ctx.fillStyle = getColorFromMemory(this.wasm.instance.exports.memory.buffer, ptr);
 		this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height)
 	}
 	''',
-	'GetRandomValue':'''
+	'GetRandomValue' : '''
 	GetRandomValue(min,max) {
 		return min+Math.floor(Math.random()*(max-min+1))
 	}
 	''',
-	'ColorFromHSV':'''
+	'ColorFromHSV' : '''
 	ColorFromHSV(result_ptr, hue, saturation, value) {
 		const buffer = this.wasm.instance.exports.memory.buffer;
 		const result = new Uint8Array(buffer, result_ptr, 4);
@@ -1397,39 +1468,35 @@ raylib_like_api = {
 
 raylib_like_api_mini = {}
 c3dom_api_mini = {}
-def gen_mini_api():
+def GenMiniAPI ():
 	syms = list(string.ascii_lowercase)
-	#syms.remove('j')
-	#nxt = lambda : syms.pop()
 	for fname in raylib_like_api:
 		code = raylib_like_api[fname].strip()
 		if code.startswith(fname):
-			sym = syms.pop()
-			code = sym + code[len(fname):]
-			raylib_like_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
-			#raylib_like_api_mini[fname] = {'sym':nxt,'code':code.replace('\t','')}
+			if len(syms) > 0:
+				sym = syms.pop()
+				code = sym + code[len(fname) :]
+				raylib_like_api_mini[fname] = { 'sym' : sym, 'code' : code.replace('\t','') }
 		else:
 			# hard coded syms
 			sym = code.split('(')[0]
-			raylib_like_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
-
-
+			raylib_like_api_mini[fname] = {'sym' : sym, 'code' : code.replace('\t','') }
 	for fname in c3dom_api:
 		code = c3dom_api[fname].strip()
 		assert code.startswith(fname)
-		sym = syms.pop()
-		code = sym + code[len(fname):]
-		c3dom_api_mini[fname] = {'sym':sym,'code':code.replace('\t','')}
-		#c3dom_api_mini[fname] = {'sym':nxt,'code':code.replace('\t','')}
+		if len(syms) > 0:
+			sym = syms.pop()
+			code = sym + code[len(fname) :]
+			c3dom_api_mini[fname] = { 'sym' : sym, 'code' : code.replace('\t','') }
 
-gen_mini_api()
+GenMiniAPI ()
 
-def gen_js_api(world, c3, user_methods):
-
+def GenJsAPI (world, c3, user_methods):
 	skip = []
 	if 'raylib::color_from_hsv' not in c3:
 		skip.append('ColorFromHSV')
 	if 'draw_circle_wasm(' not in c3:
+		skip.append('ColorFromHSV')
 		skip.append('DrawCircleWASM')
 	if 'raylib::draw_rectangle_v' not in c3:
 		skip.append('DrawRectangleV')
@@ -1443,9 +1510,10 @@ def gen_js_api(world, c3, user_methods):
 		skip.append('GetScreenWidth')
 	if 'raylib::get_screen_height' not in c3:
 		skip.append('GetScreenHeight')
-
+	if 'draw_svg' not in c3:
+		skip.append('DrawSvg')
 	if world.c3_js13kb:
-		js = [JS_LIB_API_ENV_MINI, JS_LIB_API]
+		js = [ JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
 		js = [
 			JS_LIB_API_ENV,
@@ -1455,21 +1523,20 @@ def gen_js_api(world, c3, user_methods):
 		if fname in skip:
 			print('skipping:', fname)
 			continue
-
 		if world.c3_miniapi:
 			if fname in raylib_like_api_mini:
 				js.append(raylib_like_api_mini[fname]['code'])
 		else:
 			js.append(raylib_like_api[fname])
-
 	for fname in c3dom_api:
-		used = fname+'(' in c3
+		used = fname + '(' in c3
 		if fname in 'html_set_text html_add_char html_css_scale html_css_scale_y html_css_zindex html_css_string html_css_int'.split():
 			scall = 'self.%s(' % fname.split('html_')[-1]
-			if scall in c3: used = True
+			if scall in c3:
+				used = True
 			scall = '].%s(' % fname.split('html_')[-1]
-			if scall in c3: used = True
-
+			if scall in c3:
+				used = True
 		if used:
 			print('used:', fname)
 			if world.c3_miniapi:
@@ -1478,7 +1545,6 @@ def gen_js_api(world, c3, user_methods):
 				js.append(c3dom_api[fname])
 		else:
 			print('skipping:', fname)
-
 	for fname in user_methods:
 		fudge = fname.replace('(', '(_,')
 		js += [
@@ -1486,34 +1552,30 @@ def gen_js_api(world, c3, user_methods):
 				'self=this.elts[_]',
 				'this._%s;' % fname,
 			'}',
-
-			'_'+fname + '{',
+			'_' + fname + '{',
 			user_methods[fname],
 			'}',
 		]
-
 	js.append('}')
 	js.append('new api()')
 	js = '\n'.join(js)
-
 	if 'getColorFromMemory' in js or 'color_hex_unpacked' in js:
 		js = JS_LIB_COLOR_HELPERS + js
-
 	if world.c3_js13kb:
 		js = js.replace('\t','').replace('\n','')
 		rmap = {
-			'const ': 'var ', 'entryFunction':'ef', 'make_environment':'me', 
-			'color_hex_unpacked':'cu', 'getColorFromMemory':'gm', 
-			'cstr_by_ptr':'cp', 'cstrlen':'cl',
-			'this.canvas':'this._a',
-			'window.requestAnimationFrame':'self.requestAnimationFrame',
+			'const ': 'var ', 'entryFunction' : 'ef', 'make_environment' : 'me', 
+			'color_hex_unpacked' : 'cu', 'getColorFromMemory' : 'gm', 
+			'cstr_by_ptr' : 'cp', 'cstrlen' : 'cl',
+			'this.canvas' : 'this._a',
+			'window.requestAnimationFrame' : 'self.requestAnimationFrame',
 		}
 		for rep in rmap:
 			if rep in js:
 				js = js.replace(rep, rmap[rep])
 	return js
 
-def gen_html (world, wasm, c3, user_html = None, background = '', user_methods = {}, debug = '--debug' in sys.argv):
+def GenHtml (world, wasm, c3, user_html = None, background = '', user_methods = {}, debug = '--debug' in sys.argv):
 	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', wasm ]
 	print(cmd)
 	subprocess.check_call(cmd)
@@ -1522,7 +1584,7 @@ def gen_html (world, wasm, c3, user_html = None, background = '', user_methods =
 	w = open(wasm+'.gz','rb').read()
 	b = base64.b64encode(w).decode('utf-8')
 	jtmp = '/tmp/c3api.js'
-	jslib = gen_js_api(world, c3, user_methods)
+	jslib = GenJsAPI(world, c3, user_methods)
 	open(jtmp,'w').write(jslib)
 	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', jtmp ]
 	print(cmd)
@@ -1572,13 +1634,13 @@ def gen_html (world, wasm, c3, user_html = None, background = '', user_methods =
 			'wasm bytes=%s' % len(wa),
 			'gzip bytes=%s' % len(w),
 			'base64 bytes=%s' % len(b),
-			'html bytes=%s' % (hsize- (len(b)+len(jsb)) ),
+			'html bytes=%s' % (hsize - (len(b) + len(jsb))),
 			'total bytes=%s' % hsize,
 			'C3 optimization=%s' % WORLD.c3_export_opt,
 
 		]
 		for ob in bpy.data.objects:
-			if ob.type=='GPENCIL':
+			if ob.type == 'GPENCIL':
 				o.append('%s = %s' % (ob.name, ob.data.c3_grease_quantize))
 		o.append('</pre>')
 	if not world.c3_invalid_html:
@@ -1588,7 +1650,7 @@ def gen_html (world, wasm, c3, user_html = None, background = '', user_methods =
 		]
 	return '\n'.join(o)
 
-def wasm_opt (wasm):
+def WasmOpt (wasm):
 	o = wasm.replace('.wasm', '.opt.wasm')
 	cmd = [ 'wasm-opt', '-o',o, '-Oz', wasm ]
 	print(cmd)
@@ -1598,13 +1660,14 @@ def wasm_opt (wasm):
 
 SERVER_PROC = None
 WORLD = None
-def build_wasm (world):
+def BuildWasm (world):
 	global SERVER_PROC, WORLD
 	WORLD = world
-	if SERVER_PROC: SERVER_PROC.kill()
+	if SERVER_PROC:
+		SERVER_PROC.kill()
 	user_html = []
 	user_methods = {}
-	o = blender_to_c3(world, wasm = True, html = user_html, methods = user_methods)
+	o = BlenderToC3(world, wasm = True, html = user_html, methods = user_methods)
 	o = '\n'.join(o)
 	#print(o)
 	tmp = '/tmp/c3blender.c3'
@@ -1616,13 +1679,13 @@ def build_wasm (world):
 			b = raylib_like_api_mini[fname]['sym']
 			raylib = raylib.replace('@extern("%s")' %fname, '@extern("%s")' % b)
 		open(rtmp,'w').write(raylib)
-		wasm = build(input = tmp, wasm=True, opt = world.c3_export_opt, raylib = rtmp)
+		wasm = Build(input = tmp, wasm=True, opt = world.c3_export_opt, raylib = rtmp)
 	else:
-		wasm = build(input = tmp, wasm = True, opt = world.c3_export_opt)
-	wasm = wasm_opt(wasm)
-	_BUILD_INFO['wasm']=wasm
-	_BUILD_INFO['wasm-size']=len(open(wasm,'rb').read())
-	html = gen_html(world, wasm, o, user_html, user_methods = user_methods)
+		wasm = Build(input = tmp, wasm = True, opt = world.c3_export_opt)
+	wasm = WasmOpt(wasm)
+	_BUILD_INFO['wasm'] = wasm
+	_BUILD_INFO['wasm-size'] = len(open(wasm,'rb').read())
+	html = GenHtml(world, wasm, o, user_html, user_methods = user_methods)
 	open('/tmp/index.html', 'w').write(html)
 	if world.c3_js13kb:
 		if os.path.isfile('/usr/bin/zip'):
@@ -1751,7 +1814,7 @@ for i in range(MAX_OBJECTS_PER_TEXT):
 
 bpy.types.Text.c3_extern = bpy.props.StringProperty(name = 'fn extern')
 
-def macro_pointers (txt, object = None, v2arrays = {}):
+def MacroPointers (txt, object = None, v2arrays = {}):
 	t = txt.as_string()
 	for i in range(MAX_OBJECTS_PER_TEXT):
 		tag = 'object%s' % i
@@ -1759,31 +1822,31 @@ def macro_pointers (txt, object = None, v2arrays = {}):
 		if '$' + tag + '.' in t:
 			if not ob:
 				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
-			t = t.replace('$' + tag + '.', 'objects[%s_ID].' % safename(ob).upper())
-		elif '$'+tag in t:
+			t = t.replace('$' + tag + '.', 'objects[%s_ID].' % GetSafeName(ob).upper())
+		elif '$' + tag in t:
 			if not ob:
 				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
 			t = t.replace('$' + tag, ob.name)  # only works inside of quotes in html dom
 		tag = 'color%s' % i
 		clr = getattr(txt, tag)
 		if '$' + tag in t:
-			t = t.replace('$'+tag, ','.join([str(v) for v in clr]))
+			t = t.replace('$' + tag, ','.join([str(v) for v in clr]))
 	o = []
 	for ln in t.splitlines():
 		if ln.startswith('$Vector2'):
 			assert ln.startswith('$Vector2[')
 			assert '=' not in ln
 			name = ln.split(';')[0].strip().split()[-1]
-			v2arrays[name] = ln[1:].replace(name, '%s_%s' %(name, safename(object)))
+			v2arrays[name] = ln[1:].replace(name, '%s_%s' %(name, GetSafeName(object)))
 		else:
 			for name in v2arrays:
-				if '$'+name in ln:
-					ln = ln.replace('$'+name, '%s_%s' % (name, safename(object)))
+				if '$' + name in ln:
+					ln = ln.replace('$' + name, '%s_%s' % (name, GetSafeName(object)))
 			o.append(ln)
 	return '\n'.join(o)
 
 @bpy.utils.register_class
-class C3ScriptsPanel(bpy.types.Panel):
+class C3ScriptsPanel (bpy.types.Panel):
 	bl_idname = 'OBJECT_PT_C3_Scripts_Panel'
 	bl_label = 'C3 Script Pointers'
 	bl_space_type = 'TEXT_EDITOR'
@@ -1812,7 +1875,7 @@ class C3ScriptsPanel(bpy.types.Panel):
 			self.layout.prop(txt, 'c3_init%s' % i)
 
 @bpy.utils.register_class
-class C3ObjectPanel(bpy.types.Panel):
+class C3ObjectPanel (bpy.types.Panel):
 	bl_idname = 'OBJECT_PT_C3_Object_Panel'
 	bl_label = 'C3 Object Options'
 	bl_space_type = 'PROPERTIES'
@@ -1852,7 +1915,7 @@ class C3ObjectPanel(bpy.types.Panel):
 				foundUnassignedScript = not hasProperty
 
 @bpy.utils.register_class
-class C3MaterialPanel(bpy.types.Panel):
+class C3MaterialPanel (bpy.types.Panel):
 	bl_idname = 'OBJECT_PT_C3_Material_Panel'
 	bl_label = 'C3 Material Settings'
 	bl_space_type = 'PROPERTIES'
@@ -1871,7 +1934,7 @@ class C3MaterialPanel(bpy.types.Panel):
 		self.layout.prop(mat, 'c3_export_trifan')
 		self.layout.prop(mat, 'c3_export_tristrip')
 
-if __name__=='__main__':
+if __name__ == '__main__':
 	q = o = test = None
 	for arg in sys.argv:
 		if arg.endswith('bits'):
@@ -1884,13 +1947,14 @@ if __name__=='__main__':
 			bpy.data.worlds[0].c3_export_opt = arg[2 :]
 		elif arg.startswith('--output='):
 			bpy.data.worlds[0].c3_export_html = arg.split('=')[-1]
-		elif arg=='--minifiy':
+		elif arg == '--minifiy':
 			bpy.data.worlds[0].c3_miniapi = True
-		elif arg=='--js13k':
+		elif arg == '--js13k':
 			bpy.data.worlds[0].c3_miniapi = True
 			bpy.data.worlds[0].c3_js13kb = True
 			bpy.data.worlds[0].c3_invalid_html = True
 	for ob in bpy.data.objects:
+		ob.name = ob.name.replace('é', 'e')
 		if ob.type in [ 'MESH', 'CURVE' ] and len(ob.material_slots) > 0:
 			ob.material_slots[0].material.use_nodes = False
 	if '--test' in sys.argv or test:
@@ -1900,6 +1964,6 @@ if __name__=='__main__':
 		else:
 			c3blendgen.gen_test_scene (q, o)
 	if '--wasm' in sys.argv:
-		build_wasm (bpy.data.worlds[0])
+		BuildWasm (bpy.data.worlds[0])
 	elif '--linux' in sys.argv:
-		build_linux (bpy.data.worlds[0])
+		BuildLinux (bpy.data.worlds[0])
