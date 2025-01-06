@@ -77,7 +77,6 @@ def C3ToWasmStrip (wasm):
 	print(c)
 	open(wasm,'wb').write(c)
 
-
 def Build (input = './demo.c3', output = 'demo', wasm = '--wasm' in sys.argv, opt = '--opt' in sys.argv, run = True, raylib = './raylib.c3'):
 	cmd = [C3]
 	if wasm:
@@ -121,6 +120,7 @@ def Build (input = './demo.c3', output = 'demo', wasm = '--wasm' in sys.argv, op
 
 try:
 	import bpy
+	from mathutils import *
 except:
 	bpy = None
 
@@ -207,7 +207,6 @@ HEADER_OBJECT = '''
 struct Object {
 	Vector2 position;
 	Vector2 velocity;
-	float rotation;
 	Vector2 scale;
 	Color color;
 	int id;
@@ -277,7 +276,7 @@ extern fn float random () @extern("random");
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* position, float rotation, Vector2* size, bool hide, Vector2* points, int pointCount, Vector2* leftHandles, Vector2* rightHandles, float depth, bool cyclic, bool fill, Color* color) @extern("DrawSvg");
+extern fn void draw_svg (Vector2* position, Vector2* size, bool hide, Vector2* points, int pointCount, Vector2* leftHandles, Vector2* rightHandles, float depth, bool cyclic, bool fill, Color* color) @extern("DrawSvg");
 
 extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
 extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
@@ -492,7 +491,6 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 		elif ob.type == 'CURVE':
 			curves.append(ob)
 			setup.append('	objects[%s].position = {%s, %s};' % (idx, x, y))
-			setup.append('	objects[%s].rotation = %s;' % (idx, ob.rotation_euler.z))
 			setup.append('	objects[%s].scale = {%s, %s};' % (idx, sx, sy))
 			if len(ob.material_slots) > 0:
 				materialColor = ob.material_slots[0].material.diffuse_color
@@ -506,10 +504,20 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			pointsStr = '{ '
 			leftHandlesStr = '{ '
 			rightHandlesStr = '{ '
+			if ob.rotation_mode == 'QUATERNION':
+				rot = ob.rotation_quaternion
+			else:
+				rot = ob.rotation_euler
 			for point in points:
-				pointsStr += BlenderVectorToC3(point.co, True) + ', '
-				leftHandlesStr += BlenderVectorToC3(point.handle_left, True) + ', '
-				rightHandlesStr += BlenderVectorToC3(point.handle_right, True) + ', '
+				point_ = point.co
+				point_.rotate(rot)
+				pointsStr += BlenderVectorToC3(point_, True) + ', '
+				leftHandle = point.handle_left
+				leftHandle.rotate(rot)
+				leftHandlesStr += BlenderVectorToC3(leftHandle, True) + ', '
+				rightHandle = point.handle_right
+				rightHandle.rotate(rot)
+				rightHandlesStr += BlenderVectorToC3(rightHandle, True) + ', '
 			pointsStr += '} '
 			leftHandlesStr += '} '
 			rightHandlesStr += '} '
@@ -518,7 +526,8 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			head.append('Vector2[] points_%s = %s;' %( sname, pointsStr ))
 			head.append('Vector2[] leftHandles_%s = %s;' %( sname, leftHandlesStr ))
 			head.append('Vector2[] rightHandles_%s = %s;' %( sname, rightHandlesStr ))
-			setup.append('	draw_svg(&(objects[%s].position), objects[%s].rotation, &(objects[%s].scale), objects[%s].hide, (Vector2*) &%s, %s, (Vector2*) &%s, (Vector2*) &%s, %s, %s, %s, &(objects[%s].color));' %( idx, idx, idx, idx, 'points_' + sname, len(points), 'leftHandles_' + sname, 'rightHandles_' + sname, ob.data.bevel_depth, cyclicStr, fillStr, idx ))
+			setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), objects[%s].hide, (Vector2*) &%s, %s, (Vector2*) &%s, (Vector2*) &%s, %s, %s, %s, &(objects[%s].color));'
+				%( idx, idx, idx, 'points_' + sname, len(points), 'leftHandles_' + sname, 'rightHandles_' + sname, ob.data.bevel_depth, cyclicStr, fillStr, idx ))
 		elif ob.type == 'FONT' and wasm:
 			cscale = ob.data.size * SCALE
 			if use_html:
@@ -1389,7 +1398,7 @@ raylib_like_api = {
 	}
 	''',
 	'DrawSvg' : '''
-	DrawSvg (position, rotation, size, hide, points, pointCount, leftHandles, rightHandles, depth, cyclic, fill, color)
+	DrawSvg (position, size, hide, points, pointCount, leftHandles, rightHandles, depth, cyclic, fill, color)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const position_ = new Float32Array(buf, position, 2);
@@ -1401,6 +1410,7 @@ raylib_like_api = {
 		var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 		svg.setAttribute('hidden', hide);
 		svg.setAttribute('viewBox', '0 0 ' + size_[0] + ' ' + size_[1]);
+		svg.setAttribute('style', 'position : absolute');
 		svg.setAttribute('x', position_[0] - size_[0] / 2);
 		svg.setAttribute('y', position_[1] - size_[1] / 2);
 		svg.setAttribute('width', '' + size_[0]);
