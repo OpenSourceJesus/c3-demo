@@ -316,11 +316,31 @@ def HasScripts (ob):
 			return True
 	return False
 
-def BlenderVectorToC3 (v, is2d : bool = False):
+def CurveToMesh (curve):
+	deg = bpy.context.evaluated_depsgraph_get()
+	mesh = bpy.data.meshes.new_from_object(curve.evaluated_get(deg), depsgraph = deg)
+	ob = bpy.data.objects.new(curve.name + "_Mesh", mesh)
+	bpy.context.collection.objects.link(ob)
+	ob.matrix_world = curve.matrix_world
+	return ob
+
+def BlenderVectorToC3 (v : Vector, is2d : bool = False):
 	if is2d:
 		return '{' + str(v.x) + ', ' + str(v.y) + '}'
 	else:
 		return '{' + str(v.x) + ', ' + str(v.y) + ', ' + str(v.z) + '}'
+
+def GetMinComponents (v : Vector, v2 : Vector, use2D : bool = False):
+	if use2D:
+		return Vector((min(v.x, v2.x), min(v.y, v2.y)))
+	else:
+		return Vector((min(v.x, v2.x), min(v.y, v2.y), min(v.z, v2.z)))
+
+def GetMaxComponents (v : Vector, v2 : Vector, use2D : bool = False):
+	if use2D:
+		return Vector((max(v.x, v2.x), max(v.y, v2.y)))
+	else:
+		return Vector((max(v.x, v2.x), max(v.y, v2.y), max(v.z, v2.z)))
 
 DEFAULT_COLOR = [ 0.5, 0.5, 0.5, 1 ]
 
@@ -481,17 +501,16 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 		elif ob.type == 'GREASEPENCIL':
 			meshes.append(ob)
 			if HasScripts(ob):
-				setup.append('	objects[%s].position = {%s, %s};' % (idx, x, z))
+				setup.append('	objects[%s].position = { %s, %s };' % (idx, x, z))
 				sx, sy, sz = ob.scale
-				setup.append('	objects[%s].scale = {%s, %s};' % (idx, sx, sz))
+				setup.append('	objects[%s].scale = { %s, %s };' % (idx, sx, sz))
 			if wasm:
 				GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, idx)
 			else:
 				GreaseToC3Raylib (ob, datas, head, draw, setup)
 		elif ob.type == 'CURVE':
 			curves.append(ob)
-			setup.append('	objects[%s].position = {%s, %s};' % (idx, x, y))
-			setup.append('	objects[%s].scale = {%s, %s};' % (idx, sx, sy))
+			setup.append('	objects[%s].position = { %s, %s };' % (idx, x, y))
 			if len(ob.material_slots) > 0:
 				materialColor = ob.material_slots[0].material.diffuse_color
 			else:
@@ -499,15 +518,27 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			setup.append('	objects[%s].color = {%s, %s, %s, 0xFF};' % ( idx, int(materialColor[0] * 255), int(materialColor[1] * 255), int(materialColor[2] * 255) ))
 			if ob.c3_hide:
 				setup.append('	objects[%s].hide = true;' %idx)
+			if ob.rotation_mode == 'QUATERNION':
+				rot = ob.rotation_quaternion
+			else:
+				rot = ob.rotation_euler
+			min = Vector((float('inf'), float('inf'), float('inf')))
+			max = Vector((-float('inf'), -float('inf'), -float('inf')))
+			meshOb = CurveToMesh(ob)
+			for vertex in meshOb.data.vertices:
+				vertex = vertex.co
+				vertex.rotate(rot)
+				min = GetMinComponents(vertex, min)
+				max = GetMaxComponents(vertex, max)
+			bpy.data.objects.remove(meshOb, do_unlink = True)
+			size = max - min
+			size *= ob.scale * SCALE
+			setup.append('	objects[%s].scale = { %s, %s };' % (idx, size.x, size.y))
 			spline = ob.data.splines[0]
 			points = spline.bezier_points
 			pointsStr = '{ '
 			leftHandlesStr = '{ '
 			rightHandlesStr = '{ '
-			if ob.rotation_mode == 'QUATERNION':
-				rot = ob.rotation_quaternion
-			else:
-				rot = ob.rotation_euler
 			for point in points:
 				point_ = point.co
 				point_.rotate(rot)
@@ -1417,7 +1448,7 @@ raylib_like_api = {
 		svg.setAttribute('height', '' + size_[1]);
 		var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
 		var pathStr = 'M'+ points_[0] + ' ' + points_[1];
-		for (var i = 2; i < points_.length; i += 2)
+		for (var i = 0; i < points_.length; i += 2)
 			pathStr += 'C' + leftHandles_[i] + ' ' + leftHandles_[i + 1] + ' ' + rightHandles_[i] + ' ' + rightHandles_[i + 1] + ' ' + points_[i] + ' ' + points_[i + 1];
 		path.setAttribute('d', pathStr);
 		var lineColor = color_hex_unpacked(r, g, b, a);
