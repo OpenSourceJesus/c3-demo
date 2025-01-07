@@ -265,7 +265,7 @@ def IsCircle (ob):
 		return False
 
 def GetSafeName (ob):
-	return ob.name.lower().replace('.', '_')
+	return ob.name.replace('é', 'e').lower().replace('.', '_')
 
 WASM_EXTERN = '''
 extern fn void html_css_string (int id, char *key, char *val) @extern("html_css_string");
@@ -276,7 +276,7 @@ extern fn float random () @extern("random");
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* position, Vector2* size, bool hide, Vector2* points, int pointCount, Vector2* leftHandles, Vector2* rightHandles, float depth, bool cyclic, bool fill, Color* color) @extern("DrawSvg");
+extern fn void draw_svg (Vector2* position, Vector2* size, bool hide, char* points, int pointCount, char* leftHandles, char* rightHandles, float depth, bool cyclic, bool fill, Color* color) @extern("DrawSvg");
 
 extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
 extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
@@ -324,11 +324,34 @@ def CurveToMesh (curve):
 	ob.matrix_world = curve.matrix_world
 	return ob
 
-def BlenderVectorToC3 (v : Vector, is2d : bool = False):
+def ToVector2 (v : Vector):
+	return Vector((v.x, v.y))
+
+def ToVector3 (v : Vector):
+	return Vector((v.x, v.y, 0))
+
+def BlenderVectorToC3 (v : Vector, is2d = False, round = False):
 	if is2d:
-		return '{' + str(v.x) + ', ' + str(v.y) + '}'
+		if round:
+			return '{' + str(int(v.x)) + ', ' + str(int(v.y)) + '}'
+		else:
+			return '{' + str(v.x) + ', ' + str(v.y) + '}'
+	elif round:
+		return '{' + str(int(v.x)) + ', ' + str(int(v.y)) + ', ' + str(int(v.z)) + '}'
 	else:
 		return '{' + str(v.x) + ', ' + str(v.y) + ', ' + str(v.z) + '}'
+
+def Abs (v : Vector, is2d : bool = False):
+	if is2d:
+		return Vector((abs(v.x), abs(v.y)))
+	else:
+		return Vector((abs(v.x), abs(v.y), abs(v.z)))
+
+def Round (v : Vector, is2d : bool = False):
+	if is2d:
+		return Vector((int(v.x), int(v.y)))
+	else:
+		return Vector((int(v.x), int(v.y), int(v.z)))
 
 def GetMinComponents (v : Vector, v2 : Vector, use2D : bool = False):
 	if use2D:
@@ -345,13 +368,14 @@ def GetMaxComponents (v : Vector, v2 : Vector, use2D : bool = False):
 DEFAULT_COLOR = [ 0.5, 0.5, 0.5, 1 ]
 
 def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {}):
-	resx = world.c3_export_res_x
-	resy = world.c3_export_res_y
+	resX = world.c3_export_res_x
+	resY = world.c3_export_res_y
 	SCALE = world.c3_export_scale
 	offX = world.c3_export_offset_x
 	offY = world.c3_export_offset_y
+	off = Vector((offX, offY))
 	unpackers = {}
-	head  = [ HEADER, HEADER_OBJECT ]
+	head = [ HEADER, HEADER_OBJECT ]
 	if wasm:
 		head.append(HEADER_OBJECT_WASM)
 		if world.c3_miniapi:
@@ -366,7 +390,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			for fname in raylib_like_api_mini:
 				key = '@extern("%s")' % fname
 				s = s.replace(key, '@extern("%s")' % raylib_like_api_mini[fname]['sym'])
-			head.append( s )
+			head.append(s)
 		else:
 			head.append(WASM_EXTERN)
 		head.append(WASM_HELPERS)
@@ -402,15 +426,15 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	curves = []
 	datas = {}
 	ascii_letters = list(string.ascii_uppercase)
-	prevparent = None
+	prevParentName = None
 	for ob in bpy.data.objects:
 		if ob.hide_get():
 			continue
-		print(ob)
 		sname = GetSafeName(ob)
 		x, y, z = ob.location * SCALE
 		z = -z
 		x += offX
+		y += offY
 		z += offY
 		sx, sy, sz = ob.scale * SCALE
 		idx = len(meshes + curves)
@@ -464,7 +488,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 				materialColor = ob.material_slots[0].material.diffuse_color
 			else:
 				materialColor = DEFAULT_COLOR
-			setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, int(materialColor[0] * 255), int(materialColor[1] * 255), int(materialColor[2] * 255) ))
+			setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
 			draw.append('	self = objects[%s]; //MESH: %s' % (idx, ob.name) )
 			if scripts:
 				props = {}
@@ -478,10 +502,10 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 					for prop in props:
 						if 'self.' + prop in s:
 							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
-							s = s.replace('self.' + prop, '%s_%s'%(prop, sname))
+							s = s.replace('self.' + prop, '%s_%s' %( prop, sname ))
 					draw.append('\t' + s)
 				# save object state: from stack back to heap
-				draw.append('	objects[%s] = self; //MESH: %s' % (idx, ob.name))
+				draw.append('	objects[%s] = self; //MESH: %s' %( idx, ob.name ))
 			if ob.display_type in ( 'TEXTURED', 'SOLID' ):
 				if IsCircle(ob):
 					rad = ob.data.vertices[0].co.y
@@ -492,47 +516,52 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 						rad = 1.0
 					if wasm:
 						#draw.append('	draw_circle_wasm((int)self.position.x,(int) self.position.y, self.scale.x, self.color);')
-						draw.append('	draw_circle_wasm((int) self.position.x,(int) self.position.y, self.scale.x * %s, self.color);' % rad)
+						draw.append('	draw_circle_wasm((int) self.position.x,(int) self.position.y, self.scale.x * %s, self.color);' %rad)
 					else:
 						#draw.append('	raylib::draw_circle_v(self.position, self.scale.x, self.color);')
-						draw.append('	raylib::draw_circle_v(self.position, self.scale.x * %s, self.color);' % rad)
+						draw.append('	raylib::draw_circle_v(self.position, self.scale.x * %s, self.color);' %rad)
 				else:
 					draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
 		elif ob.type == 'GREASEPENCIL':
 			meshes.append(ob)
 			if HasScripts(ob):
-				setup.append('	objects[%s].position = { %s, %s };' % (idx, x, z))
+				setup.append('	objects[%s].position = { %s, %s };' % ( idx, x, z ))
 				sx, sy, sz = ob.scale
-				setup.append('	objects[%s].scale = { %s, %s };' % (idx, sx, sz))
+				setup.append('	objects[%s].scale = { %s, %s };' % ( idx, sx, sz ))
 			if wasm:
 				GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, idx)
 			else:
 				GreaseToC3Raylib (ob, datas, head, draw, setup)
 		elif ob.type == 'CURVE':
 			curves.append(ob)
-			setup.append('	objects[%s].position = { %s, %s };' % (idx, x, y))
 			if len(ob.material_slots) > 0:
 				materialColor = ob.material_slots[0].material.diffuse_color
 			else:
 				materialColor = DEFAULT_COLOR
-			setup.append('	objects[%s].color = {%s, %s, %s, 0xFF};' % ( idx, int(materialColor[0] * 255), int(materialColor[1] * 255), int(materialColor[2] * 255) ))
+			setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
 			if ob.c3_hide:
 				setup.append('	objects[%s].hide = true;' %idx)
 			if ob.rotation_mode == 'QUATERNION':
 				rot = ob.rotation_quaternion
 			else:
 				rot = ob.rotation_euler
-			min = Vector((float('inf'), float('inf'), float('inf')))
-			max = Vector((-float('inf'), -float('inf'), -float('inf')))
+			min = Vector((float('inf'), float('inf')))
+			max = Vector((-float('inf'), -float('inf')))
 			meshOb = CurveToMesh(ob)
 			for vertex in meshOb.data.vertices:
-				vertex = vertex.co
+				vertex = vertex.co.copy()
+				vertex *= ob.scale * SCALE
 				vertex.rotate(rot)
-				min = GetMinComponents(vertex, min)
-				max = GetMaxComponents(vertex, max)
+				vertex = ToVector2(vertex)
+				vertex += off - ToVector2(ob.location * SCALE)
+				min = GetMinComponents(vertex, min, True)
+				max = GetMaxComponents(vertex, max, True)
 			bpy.data.objects.remove(meshOb, do_unlink = True)
+			min *= ToVector2(ob.scale * SCALE)
+			max *= ToVector2(ob.scale * SCALE)
 			size = max - min
-			size *= ob.scale * SCALE
+			# setup.append('	objects[%s].position = { %s, %s };' % ( idx, min.x, max.y ))
+			setup.append('	objects[%s].position = { %s, %s };' % ( idx, x, y ))
 			setup.append('	objects[%s].scale = { %s, %s };' % (idx, size.x, size.y))
 			spline = ob.data.splines[0]
 			points = spline.bezier_points
@@ -540,30 +569,43 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			leftHandlesStr = '{ '
 			rightHandlesStr = '{ '
 			for point in points:
-				point_ = point.co
+				point_ = point.co.copy()
+				point_ *= ob.scale * SCALE
 				point_.rotate(rot)
-				pointsStr += BlenderVectorToC3(point_, True) + ', '
-				leftHandle = point.handle_left
+				point_ = Abs(point_, True)
+				print(point_)
+				pointsStr += str(round(point_.x)) + ', ' + str(round(point_.y)) + ', '
+				leftHandle = point.handle_left.copy()
+				leftHandle *= ob.scale * SCALE
 				leftHandle.rotate(rot)
-				leftHandlesStr += BlenderVectorToC3(leftHandle, True) + ', '
-				rightHandle = point.handle_right
+				# leftHandle = ToVector2(leftHandle)
+				# leftHandle -= point_
+				leftHandle = Abs(leftHandle, True)
+				print(leftHandle)
+				leftHandlesStr += str(round(leftHandle.x)) + ', ' + str(round(leftHandle.y)) + ', '
+				rightHandle = point.handle_right.copy()
+				rightHandle *= ob.scale * SCALE
 				rightHandle.rotate(rot)
-				rightHandlesStr += BlenderVectorToC3(rightHandle, True) + ', '
+				# rightHandle = ToVector2(rightHandle)
+				# rightHandle -= point_
+				rightHandle = Abs(rightHandle, True)
+				print(rightHandle)
+				rightHandlesStr += str(round(rightHandle.x)) + ', ' + str(round(rightHandle.y)) + ', '
 			pointsStr += '} '
 			leftHandlesStr += '} '
 			rightHandlesStr += '} '
 			cyclicStr = str(spline.use_cyclic_u).lower()
-			fillStr = str(ob.data.fill_mode != 'None').lower()
-			head.append('Vector2[] points_%s = %s;' %( sname, pointsStr ))
-			head.append('Vector2[] leftHandles_%s = %s;' %( sname, leftHandlesStr ))
-			head.append('Vector2[] rightHandles_%s = %s;' %( sname, rightHandlesStr ))
-			setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), objects[%s].hide, (Vector2*) &%s, %s, (Vector2*) &%s, (Vector2*) &%s, %s, %s, %s, &(objects[%s].color));'
-				%( idx, idx, idx, 'points_' + sname, len(points), 'leftHandles_' + sname, 'rightHandles_' + sname, ob.data.bevel_depth, cyclicStr, fillStr, idx ))
+			fillStr = str(ob.data.fill_mode != 'NONE').lower()
+			head.append('const char[<%s>] POINTS_%s = %s;' %( len(points) * 2, sname.upper(), pointsStr ))
+			head.append('const char[<%s>] LEFT_HANDLES_%s = %s;' %( len(points) * 2, sname.upper(), leftHandlesStr ))
+			head.append('const char[<%s>] RIGHT_HANDLES_%s = %s;' %( len(points) * 2, sname.upper(), rightHandlesStr ))
+			setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), objects[%s].hide, &%s, %s, &%s, &%s, %s, %s, %s, &(objects[%s].color));'
+				%( idx, idx, idx, 'POINTS_' + sname.upper(), len(points), 'LEFT_HANDLES_' + sname.upper(), 'RIGHT_HANDLES_' + sname.upper(), ob.data.bevel_depth, cyclicStr, fillStr, idx ))
 		elif ob.type == 'FONT' and wasm:
 			cscale = ob.data.size * SCALE
 			if use_html:
-				css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %(x + (cscale * 0.1),z - cscale, cscale)
-				div = '<div id="%s" style="%s">%s</div>' %(sname, css, ob.data.body)
+				css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %( x + (cscale * 0.1), z - cscale, cscale )
+				div = '<div id="%s" style="%s">%s</div>' %( sname, css, ob.data.body )
 				html.append(div)
 				continue
 			meshes.append(ob)
@@ -580,7 +622,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			if ob.parent and HasScripts(ob.parent):
 				setup += [
 					'	objects[%s].position = {%s, %s};' % (idx, x + (cscale * 0.1), z - (cscale * 1.8)),
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name),
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % ( idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name ),
 				]
 			elif ob.parent:
 				fx = x + (cscale * 0.1)
@@ -588,13 +630,13 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 				fx += (ob.parent.location.x * SCALE) + offX
 				fy += (ob.parent.location.z * SCALE) + offY
 				setup += [
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, fx,fy, cscale, hide, dom_name),
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % ( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
 				]
 			else:
 				fx = x + (cscale * 0.1)
 				fy = z - (cscale * 1.8)
 				setup += [
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % (idx, ob.data.body, fx,fy, cscale, hide, dom_name),
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % ( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
 				]
 			if ob.scale.y != 1.0:
 				setup += [
@@ -646,9 +688,9 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
 							s = s.replace('self.' + prop, '%s_%s'%(prop, sname))
 					draw.append('\t' + s)
-			if ob.parent and HasScripts(ob.parent):
-				if prevparent != ob.parent.name:
-					prevparent = ob.parent.name
+			if ob.parent != None and HasScripts(ob.parent):
+				if prevParentName != ob.parent.name:
+					prevParentName = ob.parent.name
 					#draw.append('parent = objects[%s_id];' % GetSafeName(ob.parent))
 					draw.append('parent = objects[%s_ID];' % GetSafeName(ob.parent).upper())
 				draw += [
@@ -668,9 +710,9 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 		for gname in global_v2arrays:
 			head.append(global_v2arrays[gname])
 	if wasm:
-		setup.append(MAIN_WASM % (resx, resy))
+		setup.append(MAIN_WASM %( resX, resY ))
 	else:
-		setup.append(MAIN % (resx, resy))
+		setup.append(MAIN %( resX, resY ))
 	setup.append('}')
 	if 'self' in '\n'.join(draw):
 		drawHeader.append('	Object self;')
@@ -1434,22 +1476,27 @@ raylib_like_api = {
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const position_ = new Float32Array(buf, position, 2);
 		const size_ = new Float32Array(buf, size, 2);
-		const points_ = new Float32Array(buf, points, pointCount * 2);
-		const leftHandles_ = new Float32Array(buf, leftHandles, pointCount * 2);
-		const rightHandles_ = new Float32Array(buf, rightHandles, pointCount * 2);
+		const points_ = new Uint8Array(buf, points, pointCount * 2);
+		const leftHandles_ = new Uint8Array(buf, leftHandles, pointCount * 2);
+		const rightHandles_ = new Uint8Array(buf, rightHandles, pointCount * 2);
 		const [ r, g, b, a ] = new Uint8Array(buf, color, 4);
 		var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 		svg.setAttribute('hidden', hide);
 		svg.setAttribute('viewBox', '0 0 ' + size_[0] + ' ' + size_[1]);
 		svg.setAttribute('style', 'position : absolute');
-		svg.setAttribute('x', position_[0] - size_[0] / 2);
-		svg.setAttribute('y', position_[1] - size_[1] / 2);
+		svg.setAttribute('x', position_[0]);
+		svg.setAttribute('y', position_[1]);
 		svg.setAttribute('width', '' + size_[0]);
 		svg.setAttribute('height', '' + size_[1]);
 		var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-		var pathStr = 'M'+ points_[0] + ' ' + points_[1];
+		var pathStr = 'M' + points_[0] + ' ' + points_[1];
 		for (var i = 0; i < points_.length; i += 2)
+		{
 			pathStr += 'C' + leftHandles_[i] + ' ' + leftHandles_[i + 1] + ' ' + rightHandles_[i] + ' ' + rightHandles_[i + 1] + ' ' + points_[i] + ' ' + points_[i + 1];
+			console.log(points_[i] + ', ' + points_[i + 1]);
+			console.log(leftHandles_[i] + ', ' + leftHandles_[i + 1]);
+			console.log(rightHandles_[i] + ', ' + rightHandles_[i + 1]);
+		}
 		path.setAttribute('d', pathStr);
 		var lineColor = color_hex_unpacked(r, g, b, a);
 		if (fill)
@@ -1995,7 +2042,6 @@ if __name__ == '__main__':
 			bpy.data.worlds[0].c3_js13kb = True
 			bpy.data.worlds[0].c3_invalid_html = True
 	for ob in bpy.data.objects:
-		ob.name = ob.name.replace('é', 'e')
 		if ob.type in [ 'MESH', 'CURVE' ] and len(ob.material_slots) > 0:
 			ob.material_slots[0].material.use_nodes = False
 	if '--test' in sys.argv or test:
