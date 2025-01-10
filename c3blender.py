@@ -276,7 +276,9 @@ extern fn float random () @extern("random");
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* position, Vector2* size, bool hide, char[]* data, int dataSize) @extern("DrawSvg");
+extern fn void draw_svg (Vector2* position, Vector2* size, bool hide, char[]* data, int dataLen) @extern("DrawSvg");
+extern fn void set_svg_path (char[]* id, int idLen, char[]* pathData, int pathDataLen) @extern("SetSvgPath");
+extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, float maxDist) @extern("RandomizeSvg");
 
 extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
 extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
@@ -316,83 +318,95 @@ def HasScripts (ob):
 			return True
 	return False
 
-def CurveToMesh (curve):
-	deg = bpy.context.evaluated_depsgraph_get()
-	mesh = bpy.data.meshes.new_from_object(curve.evaluated_get(deg), depsgraph = deg)
-	ob = bpy.data.objects.new(curve.name + "_Mesh", mesh)
-	bpy.context.collection.objects.link(ob)
-	ob.matrix_world = curve.matrix_world
-	return ob
+# def CurveToMesh (curve):
+# 	deg = bpy.context.evaluated_depsgraph_get()
+# 	mesh = bpy.data.meshes.new_from_object(curve.evaluated_get(deg), depsgraph = deg)
+# 	ob = bpy.data.objects.new(curve.name + "_Mesh", mesh)
+# 	bpy.context.collection.objects.link(ob)
+# 	ob.matrix_world = curve.matrix_world
+# 	return ob
 
-def ToVector2 (v : Vector):
-	return Vector((v.x, v.y))
+# def ToVector2 (v : Vector):
+# 	return Vector((v.x, v.y))
 
-def ToVector3 (v : Vector):
-	return Vector((v.x, v.y, 0))
+# def ToVector3 (v : Vector):
+# 	return Vector((v.x, v.y, 0))
 
-def BlenderVectorToC3 (v : Vector, is2d = False, round = False):
-	if is2d:
-		if round:
-			return '{' + str(int(v.x)) + ', ' + str(int(v.y)) + '}'
-		else:
-			return '{' + str(v.x) + ', ' + str(v.y) + '}'
-	elif round:
-		return '{' + str(int(v.x)) + ', ' + str(int(v.y)) + ', ' + str(int(v.z)) + '}'
-	else:
-		return '{' + str(v.x) + ', ' + str(v.y) + ', ' + str(v.z) + '}'
+# def ToC3 (v : Vector, is2d = False, round = False):
+# 	if is2d:
+# 		if round:
+# 			return '{' + str(int(v.x)) + ', ' + str(int(v.y)) + '}'
+# 		else:
+# 			return '{' + str(v.x) + ', ' + str(v.y) + '}'
+# 	elif round:
+# 		return '{' + str(int(v.x)) + ', ' + str(int(v.y)) + ', ' + str(int(v.z)) + '}'
+# 	else:
+# 		return '{' + str(v.x) + ', ' + str(v.y) + ', ' + str(v.z) + '}'
 
-def Abs (v : Vector, is2d : bool = False):
-	if is2d:
-		return Vector((abs(v.x), abs(v.y)))
-	else:
-		return Vector((abs(v.x), abs(v.y), abs(v.z)))
+# def Abs (v : Vector, is2d : bool = False):
+# 	if is2d:
+# 		return Vector((abs(v.x), abs(v.y)))
+# 	else:
+# 		return Vector((abs(v.x), abs(v.y), abs(v.z)))
 
-def Round (v : Vector, is2d : bool = False):
-	if is2d:
-		return Vector((int(v.x), int(v.y)))
-	else:
-		return Vector((int(v.x), int(v.y), int(v.z)))
+# def Round (v : Vector, is2d : bool = False):
+# 	if is2d:
+# 		return Vector((int(v.x), int(v.y)))
+# 	else:
+# 		return Vector((int(v.x), int(v.y), int(v.z)))
 
-def GetMinComponents (v : Vector, v2 : Vector, use2D : bool = False):
-	if use2D:
-		return Vector((min(v.x, v2.x), min(v.y, v2.y)))
-	else:
-		return Vector((min(v.x, v2.x), min(v.y, v2.y), min(v.z, v2.z)))
+# def GetMinComponents (v : Vector, v2 : Vector, use2D : bool = False):
+# 	if use2D:
+# 		return Vector((min(v.x, v2.x), min(v.y, v2.y)))
+# 	else:
+# 		return Vector((min(v.x, v2.x), min(v.y, v2.y), min(v.z, v2.z)))
 
-def GetMaxComponents (v : Vector, v2 : Vector, use2D : bool = False):
-	if use2D:
-		return Vector((max(v.x, v2.x), max(v.y, v2.y)))
-	else:
-		return Vector((max(v.x, v2.x), max(v.y, v2.y), max(v.z, v2.z)))
+# def GetMaxComponents (v : Vector, v2 : Vector, use2D : bool = False):
+# 	if use2D:
+# 		return Vector((max(v.x, v2.x), max(v.y, v2.y)))
+# 	else:
+# 		return Vector((max(v.x, v2.x), max(v.y, v2.y), max(v.z, v2.z)))
 
-def QuantizeVectorComponentText (value : str, isXComponent : bool, ob, offset : Vector, foundOffset : bool):
-	value = float(value)
-	if isXComponent:
-		value *=  ob.scale.x
-	else:
-		value *= -ob.scale.y
-	value *= bpy.data.worlds[0].c3_export_scale
-	if foundOffset:
-		print(offset)
-		if isXComponent:
-			value += offset.x
-		else:
-			value += offset.y
-	elif isXComponent:
-		if 0 < value < offset.x:
-			offset.x = value
-	elif 0 < value < offset.y:
-		offset.y = value
-	return str(round(value))
+# def QuantizeVectorComponentText (value : str, isXComponent : bool, ob, offset : Vector, foundOffset : bool):
+# 	value = float(value)
+# 	if isXComponent:
+# 		value *=  ob.scale.x
+# 	else:
+# 		value *= -ob.scale.y
+# 	value *= bpy.data.worlds[0].c3_export_scale
+# 	if foundOffset:
+# 		print(offset)
+# 		if isXComponent:
+# 			value += offset.x
+# 		else:
+# 			value += offset.y
+# 	elif isXComponent:
+# 		if 0 < value < offset.x:
+# 			offset.x = value
+# 	elif 0 < value < offset.y:
+# 		offset.y = value
+# 	return str(round(value))
 
-def QuantizeVectorComponentText (value : str, isXComponent : bool, ob):
-	value = float(value)
-	if isXComponent:
-		value *=  ob.scale.x
-	else:
-		value *= ob.scale.y
-	value *= bpy.data.worlds[0].c3_export_scale
-	return str(value)
+# def QuantizeVectorComponentText (value : str, isXComponent : bool, ob):
+# 	value = float(value)
+# 	if isXComponent:
+# 		value *=  ob.scale.x
+# 	else:
+# 		value *= ob.scale.y
+# 	value *= bpy.data.worlds[0].c3_export_scale
+# 	return str(value)
+
+def ToC3 (s : str):
+	newStr = '{'
+	charCount = 0
+	for char in s:
+		newStr += str(ord(char)) + ', '
+		charCount += 1
+	if not newStr.endswith('\n'):
+		newStr += '10'
+		charCount += 1
+	newStr += '}'
+	return newStr, charCount
 
 DEFAULT_COLOR = [ 0.5, 0.5, 0.5, 1 ]
 
@@ -469,15 +483,6 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	# transformIndicator = 'transform="'
 	# indexForTranslate = svgText.find('"', svgText.find(transformIndicator) + len(transformIndicator))
 	# svgText = svgText[: indexForTranslate] + ' translate(' + str(center.x) + ', ' + str(center.y) + ')' + svgText[indexForTranslate :]
-	# data = '{ '
-	# dataSize = 0
-	# for char in svgText:
-	# 	data += str(ord(char)) + ', '
-	# 	dataSize += 1
-	# data += '}'
-	# head.append('const char[%s] DATA = %s;' %( dataSize, data ))
-	# setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), objects[%s].hide, (char[]*) &DATA, %s);'
-	# 	%( 0, 0, 0, dataSize ))
 	for ob in bpy.data.objects:
 		if ob.hide_get():
 			continue
@@ -492,8 +497,8 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 		idx = len(meshes + curves)
 		if ob.type in ( 'MESH', 'GREASEPENCIL', 'CURVE', 'FONT' ):
 			if not ob.name.startswith('_'):
-				#head.append('short %s_id=%s;' % (sname,idx))
-				head.append('const short %s_ID = %s;' % (sname.upper(), idx))
+				#head.append('short %s_id=%s;' %(sname,idx))
+				head.append('const short %s_ID = %s;' %(sname.upper(), idx))
 		scripts = []
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			txt = getattr(ob, "c3_script" + str(i))
@@ -533,15 +538,15 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 				methods[tname] = MacroPointers(txt, ob, global_v2arrays)
 		if ob.type == "MESH":
 			meshes.append(ob)
-			setup.append('	objects[%s].position = {%s,%s};' % (idx, x, z))
-			setup.append('	objects[%s].scale = {%s,%s};' % (idx, sx, sz))
-			#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' % (idx, random()))
+			setup.append('	objects[%s].position = {%s,%s};' %(idx, x, z))
+			setup.append('	objects[%s].scale = {%s,%s};' %(idx, sx, sz))
+			#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' %(idx, random()))
 			if len(ob.material_slots) > 0:
 				materialColor = ob.material_slots[0].material.diffuse_color
 			else:
 				materialColor = DEFAULT_COLOR
 			setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
-			draw.append('	self = objects[%s]; //MESH: %s' % (idx, ob.name) )
+			draw.append('	self = objects[%s]; //MESH: %s' %(idx, ob.name) )
 			if scripts:
 				props = {}
 				for prop in ob.keys():
@@ -577,9 +582,9 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 		elif ob.type == 'GREASEPENCIL':
 			meshes.append(ob)
 			if HasScripts(ob):
-				setup.append('	objects[%s].position = { %s, %s };' % ( idx, x, z ))
+				setup.append('	objects[%s].position = { %s, %s };' %( idx, x, z ))
 				sx, sy, sz = ob.scale
-				setup.append('	objects[%s].scale = { %s, %s };' % ( idx, sx, sz ))
+				setup.append('	objects[%s].scale = { %s, %s };' %( idx, sx, sz ))
 			if wasm:
 				GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, idx)
 			else:
@@ -593,38 +598,27 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
 			if ob.c3_hide:
 				setup.append('	objects[%s].hide = true;' %idx)
-			if ob.rotation_mode == 'QUATERNION':
-				rot = ob.rotation_quaternion
-			else:
-				rot = ob.rotation_euler
-			min = Vector((float('inf'), float('inf')))
-			max = Vector((-float('inf'), -float('inf')))
-			meshOb = CurveToMesh(ob)
-			for vertex in meshOb.data.vertices:
-				vertex = vertex.co.copy()
-				vertex *= ob.scale * SCALE
-				vertex = ToVector2(vertex)
-				vertex += off - ToVector2(ob.location * SCALE)
-				min = GetMinComponents(vertex, min, True)
-				max = GetMaxComponents(vertex, max, True)
-			bpy.data.objects.remove(meshOb, do_unlink = True)
-			min *= ToVector2(ob.scale * SCALE)
-			max *= ToVector2(ob.scale * SCALE)
-			size = max - min
-			center = (min + max) / 2
-			# setup.append('	objects[%s].position = { %s, %s };' % ( idx, min.x, max.y ))
-			setup.append('	objects[%s].scale = { %s, %s };' % (idx, size.x, size.y))
-			# bpy.ops.object.select_all(action = 'DESELECT')
-			# ob.select_set(True)
-			# bpy.ops.curve.export_svg()
-			# svgText = open('/tmp/Output.svg', 'r').read()
-			# svgText = svgText.replace('<?xml version="1.0" ?>\n', '')
-			# svgText = svgText.replace('  <!-- Generated by blender-curve-to-svg v0.0.2 -->\n', '')
-			# indexForStyle = svgText.find('>', svgText.find('svg '))
-			# svgText = svgText[: indexForStyle] + ' style="; position : absolute; z-index : ' + str(round(ob.location.z)) + '"' + svgText[indexForStyle :]
-			# transformIndicator = 'transform="'
-			# indexForTranslate = svgText.find('"', svgText.find(transformIndicator) + len(transformIndicator))
-			# svgText = svgText[: indexForTranslate] + ' translate(' + str(center.x) + ', ' + str(center.y) + ')' + svgText[indexForTranslate :]
+			# if ob.rotation_mode == 'QUATERNION':
+			# 	rot = ob.rotation_quaternion
+			# else:
+			# 	rot = ob.rotation_euler
+			# min = Vector((float('inf'), float('inf')))
+			# max = Vector((-float('inf'), -float('inf')))
+			# meshOb = CurveToMesh(ob)
+			# for vertex in meshOb.data.vertices:
+			# 	vertex = vertex.co.copy()
+			# 	vertex *= ob.scale * SCALE
+			# 	vertex = ToVector2(vertex)
+			# 	vertex += off - ToVector2(ob.location * SCALE)
+			# 	min = GetMinComponents(vertex, min, True)
+			# 	max = GetMaxComponents(vertex, max, True)
+			# bpy.data.objects.remove(meshOb, do_unlink = True)
+			# min *= ToVector2(ob.scale * SCALE)
+			# max *= ToVector2(ob.scale * SCALE)
+			# size = max - min
+			# center = (min + max) / 2
+			# setup.append('	objects[%s].position = { %s, %s };' %( idx, min.x, max.y ))
+			setup.append('	objects[%s].scale = { %s, %s };' %( idx, ob.scale.x, ob.scale.y ))
 			svgText_ = svgText
 			indexOfName = svgText_.find(ob.name)
 			indexOfGroupStart = svgText_.rfind('\n', 0, indexOfName)
@@ -639,15 +633,23 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			positionTypeIndicator = 'position : absolute;'
 			indexForZIndex = svgText_.find(positionTypeIndicator) + len(positionTypeIndicator)
 			svgText_ = svgText_[: indexForZIndex] + 'z-index : ' + str(round(ob.location.z)) + svgText_[indexForZIndex :]
-			data = '{ '
-			dataSize = 0
-			for char in svgText_:
-				data += str(ord(char)) + ', '
-				dataSize += 1
-			data += '}'
-			head.append('const char[%s] DATA_%s = %s;' %( dataSize, sname.upper(), data ))
+			# transformIndicator = 'transform="'
+			# indexForTranslate = svgText_.find('"', svgText_.find(transformIndicator) + len(transformIndicator))
+			# svgText_ = svgText_[: indexForTranslate] + ' translate(' + str(center.x) + ', ' + str(center.y) + ')' + svgText_[indexForTranslate :]
+			svgData, svgDataLen = ToC3(svgText_)
+			head.append('const char[%s] SVG_DATA_%s = %s;' %( svgDataLen, sname.upper(), svgData ))
 			setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), objects[%s].hide, (char[]*) &%s, %s);'
-				%( idx, idx, idx, 'DATA_' + sname.upper(), dataSize ))
+				%( idx, idx, idx, 'SVG_DATA_' + sname.upper(), svgDataLen ))
+			idData, idDataLen = ToC3(ob.name)
+			head.append('const char[%s] ID_%s = %s;' %( idDataLen, sname.upper(), idData ))
+			pathDataIndicator = ' d="'
+			indexOfPathDataStart = svgText_.find(pathDataIndicator) + len(pathDataIndicator)
+			indexOfPathDataEnd = svgText_.find('"', indexOfPathDataStart)
+			pathData = svgText_[indexOfPathDataStart : indexOfPathDataEnd]
+			pathData, pathDataLen = ToC3(pathData)
+			head.append('const char[%s] PATH_DATA_%s = %s;' %( pathDataLen, sname.upper(), pathData ))
+			# draw.append('	set_svg_path((char[]*) &%s, %s, (char[]*) &%s, %s);' %( ID_ + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen ))
+			draw.append('	randomize_svg((char[]*) &%s, %s, (char[]*) &%s, %s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, 0.01 ))
 		elif ob.type == 'FONT' and wasm:
 			cscale = ob.data.size * SCALE
 			if use_html:
@@ -668,8 +670,8 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 				dom_name = ''
 			if ob.parent and HasScripts(ob.parent):
 				setup += [
-					'	objects[%s].position = {%s, %s};' % (idx, x + (cscale * 0.1), z - (cscale * 1.8)),
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % ( idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name ),
+					'	objects[%s].position = {%s, %s};' %( idx, x + (cscale * 0.1), z - (cscale * 1.8) ),
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name ),
 				]
 			elif ob.parent:
 				fx = x + (cscale * 0.1)
@@ -677,23 +679,23 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 				fx += (ob.parent.location.x * SCALE) + offX
 				fy += (ob.parent.location.z * SCALE) + offY
 				setup += [
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % ( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
 				]
 			else:
 				fx = x + (cscale * 0.1)
 				fy = z - (cscale * 1.8)
 				setup += [
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' % ( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
+					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
 				]
 			if ob.scale.y != 1.0:
 				setup += [
-					'	objects[%s].css_scale_y(%s);' % (idx, ob.scale.y),
+					'	objects[%s].css_scale_y(%s);' %(idx, ob.scale.y),
 				]
 			if ob.c3_onclick:
 				tname = GetSafeName(ob.c3_onclick)
 				if wasm and ascii_letters:
 					head += [
-						'fn void _onclick_%s(int _index_) @extern("%s") {' % ( tname, ascii_letters.pop() ),
+						'fn void _onclick_%s(int _index_) @extern("%s") {' %( tname, ascii_letters.pop() ),
 						'	Object self = objects[_index_];',
 						MacroPointers(ob.c3_onclick, ob, global_v2arrays),
 						'}',
@@ -705,41 +707,42 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 						MacroPointers(ob.c3_onclick, ob, global_v2arrays),
 						'}',
 					]
-				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %(idx, tname, idx))
+				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %( idx, tname, idx ))
 			if ob.location.y >= 0.1:
-				setup.append('	html_css_zindex(objects[%s].id, -%s);' % (idx, int(ob.location.y * 10)))
+				setup.append('	html_css_zindex(objects[%s].id, -%s);' %( idx, int(ob.location.y * 10) ))
 			elif ob.location.y <= -0.1:
-				setup.append('	html_css_zindex(objects[%s].id, %s);' % (idx, abs(int(ob.location.y * 10))) )
+				setup.append('	html_css_zindex(objects[%s].id, %s);' %( idx, abs(int(ob.location.y * 10)) ))
 			# slightly bigger than using html_css_zindex
 			#if ob.location.y >= 0.1:
-			#	setup.append('	html_css_int(objects[%s].id,"zIndex",-%s);' % (idx, int(ob.location.y*10)))
+			#	setup.append('	html_css_int(objects[%s].id,"zIndex",-%s);' %( idx, int(ob.location.y * 10) ))
 			#elif ob.location.y <= -0.1:
-			#	setup.append('	html_css_int(objects[%s].id,"zIndex", %s);' % (idx, abs(int(ob.location.y*10))) )
+			#	setup.append('	html_css_int(objects[%s].id,"zIndex", %s);' %( idx, abs(int(ob.location.y * 10)) ))
 			if scripts or (ob.parent and HasScripts(ob.parent)):
-				draw.append('	self = objects[%s]; // %s' % (idx, ob.name))
+				draw.append('	self = objects[%s]; // %s' %( idx, ob.name ))
 			if scripts:
 				props = {}
 				for prop in ob.keys():
-					if prop.startswith( ('_', 'c3_') ): continue
-					#head.append('float %s_%s = %s;' %(sname, prop, ob[prop])) 
+					if prop.startswith( ('_', 'c3_') ):
+						continue
+					#head.append('float %s_%s = %s;' %( sname, prop, ob[prop] )) 
 					# Error: A letter must precede any digit `__001` (object copy in blender renames with .00N)
 					if ob[prop] == 0:
-						head.append('float %s_%s;' %(prop, sname))
+						head.append('float %s_%s;' %( prop, sname )) 
 					else:
-						head.append('float %s_%s = %s;' %(prop, sname, ob[prop]))
+						head.append('float %s_%s = %s;' %( prop, sname, ob[prop] ))
 					props[prop] = ob[prop]
 				# user C3 scripts
 				for s in scripts:
 					for prop in props:
 						if 'self.' + prop in s:
-							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
-							s = s.replace('self.' + prop, '%s_%s'%(prop, sname))
+							#s = s.replace('self.'+prop, '%s_%s' %(sname,prop))
+							s = s.replace('self.' + prop, '%s_%s' %( prop, sname ))
 					draw.append('\t' + s)
 			if ob.parent != None and HasScripts(ob.parent):
 				if prevParentName != ob.parent.name:
 					prevParentName = ob.parent.name
 					#draw.append('parent = objects[%s_id];' % GetSafeName(ob.parent))
-					draw.append('parent = objects[%s_ID];' % GetSafeName(ob.parent).upper())
+					draw.append('parent = objects[%s_ID];' %GetSafeName(ob.parent).upper())
 				draw += [
 					#'parent = objects[%s_id];' % GetSafeName(ob.parent),
 					#'self.position.x=parent.position.x;',
@@ -822,14 +825,14 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname, lidx, sidx),
 						'	&__%s__%s_%s,' %(dname, lidx, sidx),
 						'	%s,' % n,
-						'	%s, %s' % (x0 * q, z0 * q),
+						'	%s, %s' %(x0 * q, z0 * q),
 						');',
 					]
-					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % (gquant, n, dname, lidx, sidx, ','.join(qstroke['points'])))
+					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' %(gquant, n, dname, lidx, sidx, ','.join(qstroke['points'])))
 					if gquant in ('6bits', '7bits'):
-						data.append('Vector2[%s] __%s__%s_%s;' % ( (n * 3), dname, lidx, sidx ))
+						data.append('Vector2[%s] __%s__%s_%s;' %( (n * 3), dname, lidx, sidx ))
 					else:
-						data.append('Vector2[%s] __%s__%s_%s;' % (n + 1, dname, lidx, sidx ))
+						data.append('Vector2[%s] __%s__%s_%s;' %(n + 1, dname, lidx, sidx ))
 						n += 1
 				else:
 					# default 32bit floats #
@@ -837,14 +840,14 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 					if scripts:
 						for pnt in points:
 							x1,y1,z1 = pnt.position * SCALE
-							s.append('{%s,%s}' % (x1, -z1))
+							s.append('{%s,%s}' %(x1, -z1))
 					else:
 						for pnt in points:
 							x1, y1, z1 = pnt.position
 							x1 *= sx
 							z1 *= sz
-							s.append('{%s,%s}' % (x1 + offX + x, -z1 + offY + z))
-					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (len(points), dname, lidx, sidx, ','.join(s)))
+							s.append('{%s,%s}' %(x1 + offX + x, -z1 + offY + z))
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' %(len(points), dname, lidx, sidx, ','.join(s)))
 					n = len(s)
 				if gquant in ('6bits', '7bits'):
 					nn = n*3
@@ -875,7 +878,7 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 					s = s.replace('self.' + prop, '%s_%s'%(sname,prop))
 			draw.append('\t' + s)
 		# save object state: from stack back to heap
-		draw.append('	objects[%s] = self; // %s' % (obIndex, ob.name))
+		draw.append('	objects[%s] = self; // %s' %(obIndex, ob.name))
 	for a in datas[dname]['draw']:
 		r, g, b, alpha = a['color']
 		r = int(r * 255)
@@ -884,16 +887,16 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 		if not scripts:
 			# static grease pencil
 			if a['fill']:
-				draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (dname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r, g, b, alpha))
+				draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' %(dname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r, g, b, alpha))
 			else:
-				draw.append('	draw_spline_wasm(&__%s__%s_%s,%s,%s, 0, 0,0,0,0);' % (dname, a['layer'], a['index'], a['length'], a['width']))
+				draw.append('	draw_spline_wasm(&__%s__%s_%s,%s,%s, 0, 0,0,0,0);' %(dname, a['layer'], a['index'], a['length'], a['width']))
 		else:
 			tag = [oname, a['layer'], a['index']]
 			head.append('Vector2[%s] _%s_%s_%s;' % tuple([a['length']] + tag) )
 			dtag = [dname, a['layer'], a['index']]
 			draw += [
 				'	transform_spline_wasm(&__%s__%s_%s, &_%s_%s_%s, %s, objects[%s].position, objects[%s].scale);' %tuple(dtag + tag + [ a['length'], obIndex, obIndex ]),
-				'	draw_spline_wasm(&_%s_%s_%s, %s, %s, %s, %s,%s,%s,%s);' % (oname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r, g, b, alpha)
+				'	draw_spline_wasm(&_%s_%s_%s, %s, %s, %s, %s,%s,%s,%s);' %(oname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r, g, b, alpha)
 			]
 
 def GetDeltaDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
@@ -906,22 +909,22 @@ def GetDeltaDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
 		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0) @extern("u%s") {' %(dname, gquant, qkey),
 		'	int j=0;',
 		'	out[0].x = (x0*%sf) + %sf;' %(qs * sx, offX + x),
-		'	out[0].y = -(z0*%sf) + %sf;'  % (qs * sz, offY + z),
+		'	out[0].y = -(z0*%sf) + %sf;'  %(qs * sz, offY + z),
 		'	for (int i=0; i<len; i++){',
 		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs * sx, offX + x),
-		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' % (qs * sz, offY + z),
+		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' %(qs * sz, offY + z),
 
 		'		j++;',
 		'		out[j].x = ax;',
 		'		out[j].y = ay;',
 
 		'		j++;',
-		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x1)) * %sf) + %sf;' % (qs * sx, offX + x),
-		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y1)) * %sf) + %sf;' % (qs * sz, offY + z),
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x1)) * %sf) + %sf;' %(qs * sx, offX + x),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y1)) * %sf) + %sf;' %(qs * sz, offY + z),
 
 		'		j++;',
-		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' % (qs * sx, offX + x),
-		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' % (qs * sz, offY + z),
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' %(qs * sx, offX + x),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' %(qs * sz, offY + z),
 		'	}',
 		'}'
 	]
@@ -933,11 +936,11 @@ def GetDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
 	return [
 		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
 		'	out[0].x = (x0*%sf) + %sf;' %(qs * sx, offX + x),
-		'	out[0].y = -(z0*%sf) + %sf;'  % (qs * sz, offY + z),
+		'	out[0].y = -(z0*%sf) + %sf;'  %(qs * sz, offY + z),
 		'	for (int i = 0; i < len; i ++){',
 		'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs * sx, offX + x),
 		'		out[i + 1].x = a;',
-		'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs * sz, offY + z),
+		'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' %(qs * sz, offY + z),
 		'		out[i + 1].y = a;',
 		'	}',
 		'}'
@@ -968,7 +971,7 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 						x1,y1,z1 = GetCenter(stroke.points)
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' % (x1 + offX + x, -z1 + offY + z))
+						s.append('{%s,%s}' %(x1 + offX + x, -z1 + offY + z))
 					elif mat.c3_export_tristrip:
 						tri_strip = True
 					else:
@@ -978,23 +981,23 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 							tris.append(tri.v2)
 							tris.append(tri.v3)
 						tris = ','.join([str(vidx) for vidx in tris])
-						data.append('int[%s] __%s__%s_%s_tris = {%s};' % ( len(stroke.triangles)*3,dname, lidx, sidx, tris ))
+						data.append('int[%s] __%s__%s_%s_tris = {%s};' %( len(stroke.triangles)*3,dname, lidx, sidx, tris ))
 					# default 32bit floats #
 					for pnt in stroke.points:
 						x1,y1,z1 = pnt.position
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' % (x1 + offX + x, -z1 + offY + z))
+						s.append('{%s,%s}' %(x1 + offX + x, -z1 + offY + z))
 					n = len(s)
-					data.append('Vector2[%s] __%s__%s_%s = {%s};' % (n, dname, lidx, sidx, ','.join(s) ))
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' %(n, dname, lidx, sidx, ','.join(s) ))
 				elif gquant:
 					qstroke = Quantizer(stroke.points, gquant)
 					n = len(qstroke['points'])
 					if not len(qstroke['points']):
 						print('stroke quantized away:', stroke)
 						continue
-					data.append('Vector2[%s] __%s__%s_%s;' % (n+1,dname, lidx, sidx ))
-					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' % ( gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
+					data.append('Vector2[%s] __%s__%s_%s;' %(n+1,dname, lidx, sidx ))
+					data.append('Vector2_%s[%s] __%s__%s_%s_pak = {%s};' %( gquant,n,dname, lidx, sidx, ','.join(qstroke['points']) ))
 					x0, y0, z0 = stroke.points[0].position
 					q = qstroke['q']
 					qs = qstroke['qs']
@@ -1002,7 +1005,7 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname, lidx, sidx),
 						'	&__%s__%s_%s,' %(dname, lidx, sidx),
 						'	%s,' % len(stroke. points),
-						'	%s, %s' % (x0 * q, z0 * q),
+						'	%s, %s' %(x0 * q, z0 * q),
 						');',
 					]
 				else:
@@ -1012,20 +1015,20 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 						x1,y1,z1 = pnt.position
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' % (x1 + offX + x, -z1 + offY + z))
-					data.append('Vector2[%s] __%s__%s_%s = {%s};' % ( len(stroke.points),dname, lidx, sidx, ','.join(s) ))
+						s.append('{%s,%s}' %(x1 + offX + x, -z1 + offY + z))
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' %( len(stroke.points),dname, lidx, sidx, ','.join(s) ))
 					n = len(s)
 				r, g, b, a = mat.grease_pencil.fill_color
 				swidth = GetStrokeWidth(stroke)
 				if use_fill:
-					clr = '{%s,%s,%s,%s}' % (int(r * 255), int(g * 255), int(b * 255), int(a * 255))
+					clr = '{%s,%s,%s,%s}' %(int(r * 255), int(g * 255), int(b * 255), int(a * 255))
 					if mat.c3_export_trifan:
-						draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n, clr))
+						draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' %(dname, lidx, sidx, n, clr))
 					elif mat.c3_export_tristrip:
-						draw.append('	raylib::draw_triangle_strip(&__%s__%s_%s, %s, %s);' % (dname, lidx, sidx, n, clr))
+						draw.append('	raylib::draw_triangle_strip(&__%s__%s_%s, %s, %s);' %(dname, lidx, sidx, n, clr))
 					else:
 						draw += [
-							'	for (int i=0; i<%s; i+=3){' % (len(stroke.triangles) * 3),
+							'	for (int i=0; i<%s; i+=3){' %(len(stroke.triangles) * 3),
 							'		int idx = __%s__%s_%s_tris[i+2];' %(dname, lidx, sidx),
 							'		Vector2 v1 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
 							'		idx = __%s__%s_%s_tris[i+1];'   %(dname, lidx, sidx),
@@ -1036,9 +1039,9 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 							'	}',
 						]
 					if mat.grease_pencil.show_stroke:
-						draw.append('	raylib::draw_spline( (&__%s__%s_%s), %s, 4.0, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n))
+						draw.append('	raylib::draw_spline( (&__%s__%s_%s), %s, 4.0, {0x00,0x00,0x00,0xFF});' %(dname, lidx, sidx, n))
 				else:
-					draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, %s, {0x00,0x00,0x00,0xFF});' % (dname, lidx, sidx, n, swidth))
+					draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, %s, {0x00,0x00,0x00,0xFF});' %(dname, lidx, sidx, n, swidth))
 		head += data
 		if gquant:
 			x, y, z = ob.location * SCALE
@@ -1047,11 +1050,11 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 			head += [
 				'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
 				'	out[0].x = (x0*%sf) + %sf;' %(qs * sx, offX + x),
-				'	out[0].y = -(z0*%sf) + %sf;'  % (qs * sz, offY + z),
+				'	out[0].y = -(z0*%sf) + %sf;'  %(qs * sz, offY + z),
 				'	for (int i = 0; i < len; i ++){',
 				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs * sx, offX + x),
 				'		out[i + 1].x = a;',
-				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' % (qs * sz, offY + z),
+				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' %(qs * sz, offY + z),
 				'		out[i + 1].y = a;',
 				'	}',
 				'}'
@@ -1128,7 +1131,7 @@ def Quantizer (points, quant, trim = True):
 				s.append('{%s}' % ', '.join( '%s,%s' % v for v in mvec))
 				mvec = []
 		else:
-			vec = '{%s,%s}' % (dx, dz)
+			vec = '{%s,%s}' %(dx, dz)
 			if trim:
 				if s and s[-1] == vec:
 					continue
@@ -1518,12 +1521,48 @@ raylib_like_api = {
 	}
 	''',
 	'DrawSvg' : '''
-	DrawSvg (position, size, hide, data, dataSize)
+	DrawSvg (position, size, hide, data, dataLen)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
-		const data_ = new TextDecoder().decode(new Uint8Array(buf, data, dataSize));
+		const data_ = new TextDecoder().decode(new Uint8Array(buf, data, dataLen));
 		document.documentElement.innerHTML = document.documentElement.innerHTML.replace('</script>', '</script>' + data_);
-		console.log(data_);
+	}
+	''',
+	'SetSvgPath' : '''
+	SetSvgPath (id, idLen, pathData, pathDataLen)
+	{
+		const buf = this.wasm.instance.exports.memory.buffer;
+		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen));
+		const pathData_ = new TextDecoder().decode(new Uint8Array(buf, pathData, pathDataLen));
+		document.getElementById(id_).children[0].setAttribute("d", pathData_);
+	}
+	''',
+	'RandomizeSvg' : '''
+	RandomizeSvg (id, idLen, initPathData, initPathDataLen, maxDist)
+	{
+		const buf = this.wasm.instance.exports.memory.buffer;
+		var id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
+		const initPathData_ = new TextDecoder().decode(new Uint8Array(buf, initPathData, initPathDataLen));
+		var vectors = initPathData_.split(' ');
+		var newPathData = '';
+		for (var i = 0; i < vectors.length; i ++)
+		{
+			var vector = vectors[i];
+			if (vector.length == 1)
+				newPathData += vector;
+			else
+			{
+				var components = vector.split(',');
+				var offsetDist = Math.random() * maxDist;
+				var offsetAng = Math.random() * 2 * Math.PI;
+				var offsetX = Math.cos(offsetAng) * offsetDist;
+				var offsetY = Math.sin(offsetAng) * offsetDist;
+				var x = parseFloat(components[0]);
+				var y = parseFloat(components[1]);
+				newPathData += '' + (x + offsetX) + ',' + (y + offsetY) + ' ';
+			}
+		}
+		document.getElementById(id_).children[0].setAttribute("d", newPathData);
 	}
 	''',
 	'ClearBackground' : '''
@@ -1739,14 +1778,14 @@ def GenHtml (world, wasm, c3, user_html = None, background = '', user_methods = 
 			'wasm bytes=%s' % len(wa),
 			'gzip bytes=%s' % len(w),
 			'base64 bytes=%s' % len(b),
-			'html bytes=%s' % (hsize - (len(b) + len(jsb))),
+			'html bytes=%s' %(hsize - (len(b) + len(jsb))),
 			'total bytes=%s' % hsize,
 			'C3 optimization=%s' % WORLD.c3_export_opt,
 
 		]
 		for ob in bpy.data.objects:
 			if ob.type == 'GPENCIL':
-				o.append('%s = %s' % (ob.name, ob.data.c3_grease_quantize))
+				o.append('%s = %s' %(ob.name, ob.data.c3_grease_quantize))
 		o.append('</pre>')
 	if not world.c3_invalid_html:
 		o += [
@@ -1926,11 +1965,11 @@ def MacroPointers (txt, object = None, v2arrays = {}):
 		ob = getattr(txt, tag)
 		if '$' + tag + '.' in t:
 			if not ob:
-				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
+				raise RuntimeError('%s text object pointer not set: %s' %(txt, tag) )
 			t = t.replace('$' + tag + '.', 'objects[%s_ID].' % GetSafeName(ob).upper())
 		elif '$' + tag in t:
 			if not ob:
-				raise RuntimeError('%s text object pointer not set: %s' % (txt, tag) )
+				raise RuntimeError('%s text object pointer not set: %s' %(txt, tag) )
 			t = t.replace('$' + tag, ob.name)  # only works inside of quotes in html dom
 		tag = 'color%s' % i
 		clr = getattr(txt, tag)
@@ -1946,7 +1985,7 @@ def MacroPointers (txt, object = None, v2arrays = {}):
 		else:
 			for name in v2arrays:
 				if '$' + name in ln:
-					ln = ln.replace('$' + name, '%s_%s' % (name, GetSafeName(object)))
+					ln = ln.replace('$' + name, '%s_%s' %(name, GetSafeName(object)))
 			o.append(ln)
 	return '\n'.join(o)
 
@@ -2061,6 +2100,7 @@ if __name__ == '__main__':
 	for ob in bpy.data.objects:
 		if ob.type in [ 'MESH', 'CURVE' ] and len(ob.material_slots) > 0:
 			ob.material_slots[0].material.use_nodes = False
+			ob.name = ob.name.replace('é', 'e')
 			if ob.type == 'CURVE':
 				isRotated = False
 				if ob.rotation_mode == 'QUATERNION':
