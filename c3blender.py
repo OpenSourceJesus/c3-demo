@@ -276,9 +276,9 @@ extern fn float random () @extern("random");
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* position, Vector2* size, Color* color, bool hide, char[]* id, int idLen, char[4]* viewBox, char[]* pathData, int pathDataLen, int zIndex) @extern("DrawSvg");
+extern fn void draw_svg (Vector2* position, Vector2* size, Color* color, bool hide, char[]* id, int idLen, char[4]* viewBox, char[]* pathData, int pathDataLen, int zIndex, bool cyclic) @extern("DrawSvg");
 extern fn void set_svg_path (char[]* id, int idLen, char[]* pathData, int pathDataLen) @extern("SetSvgPath");
-extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, float maxDist) @extern("RandomizeSvg");
+extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, bool cyclic, float maxDist) @extern("RandomizeSvg");
 
 extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
 extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
@@ -301,19 +301,19 @@ extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
 '''
 
-def GetScripts (ob):
+def GetScripts (ob, type : str):
 	scripts = []
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
-		if getattr(ob, "c3_script%s_disable" %i):
+		if getattr(ob, 'c3Script%sDisable' %i):
 			continue
-		txt = getattr(ob, "c3_script" + str(i))
+		txt = getattr(ob, type + 'Script' + str(i))
 		if txt != None:
 			scripts.append(MacroPointers(txt, ob))
 	return scripts
 
-def HasScripts (ob):
+def HasScript (ob, type : str):
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
-		txt = getattr(ob, "c3_script" + str(i))
+		txt = getattr(ob, type + 'Script' + str(i))
 		if txt != None:
 			return True
 	return False
@@ -457,9 +457,9 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			if ftxt and ftxt.name not in global_funcs:
 				global_funcs[ftxt.name]=ftxt
 				head.append(ftxt.as_string())
-			itxt = getattr(txt, 'c3_init%s' % i)
+			itxt = getattr(txt, 'c3Init%s' % i)
 			if itxt and itxt.name not in main_init:
-				main_init[itxt.name]=itxt
+				main_init[itxt.name] = itxt
 				setup.append(itxt.as_string())
 	drawHeader = [
 		'fn void game_frame() @extern("$") @wasm {',
@@ -505,11 +505,11 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 				head.append('const short %s_ID = %s;' %(sname.upper(), idx))
 		scripts = []
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
-			txt = getattr(ob, "c3_script" + str(i))
+			txt = getattr(ob, "c3Script" + str(i))
 			if txt:
-				if not getattr(ob, "c3_script%s_disable" %i):
+				if not getattr(ob, "c3Script%sDisable" %i):
 					scripts.append(MacroPointers(txt, ob, global_v2arrays))
-			txt = getattr(ob, "c3_method" + str(i))
+			txt = getattr(ob, "c3Method" + str(i))
 			if txt and txt.name not in methods:
 				tname = txt.name
 				assert '(' in tname
@@ -585,7 +585,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 					draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
 		elif ob.type == 'GREASEPENCIL':
 			meshes.append(ob)
-			if HasScripts(ob):
+			if HasScript(ob, 'c3'):
 				setup.append('	objects[%s].position = { %s, %s };' %( idx, x, z ))
 				sx, sy, sz = ob.scale
 				setup.append('	objects[%s].scale = { %s, %s };' %( idx, sx, sz ))
@@ -651,14 +651,28 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			indexOfPathDataEnd = svgText_.find('"', indexOfPathDataStart)
 			pathData = svgText_[indexOfPathDataStart : indexOfPathDataEnd]
 			pathData = pathData.replace('.0', '')
-			pathData, pathDataLen = ToC3(pathData)
-			head.append('const char[%s] PATH_DATA_%s = %s;' %( pathDataLen, sname.upper(), pathData ))
+			pathData_ = []
+			pathDataLen = 0
+			vectors = pathData.split(' ')
+			for vector in vectors:
+				if len(vector) == 1:
+					continue
+				components = vector.split(',')
+				x = int(components[0])
+				y = int(components[1])
+				pathData_.append(x + 128)
+				pathData_.append(y + 128)
+				pathDataLen += 2
+			pathData_ = '{' + str(pathData_)[1 : -1] + '}'
+			head.append('const char[%s] PATH_DATA_%s = %s;' %( pathDataLen, sname.upper(), pathData_ ))
 			idData, idDataLen = ToC3(ob.name)
 			head.append('const char[%s] ID_%s = %s;' %( idDataLen, sname.upper(), idData ))
-			setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[4]*) &%s, (char[]*) &%s, %s, %s);'
-				%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'VIEW_BOX_' + sname.upper(), 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z) ))
+			cyclic = ob.data.splines[0].use_cyclic_u
+			isCyclicStr = str(cyclic).lower()
+			setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[4]*) &%s, (char[]*) &%s, %s, %s, %s);'
+				%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'VIEW_BOX_' + sname.upper(), 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr ))
 			# draw.append('	set_svg_path((char[]*) &%s, %s, (char[]*) &%s, %s);' %( ID_ + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen ))
-			draw.append('	randomize_svg((char[]*) &%s, %s, (char[]*) &%s, %s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, 2 ))
+			draw.append('	randomize_svg((char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, isCyclicStr, 0.3 ))
 		elif ob.type == 'FONT' and wasm:
 			cscale = ob.data.size * SCALE
 			if use_html:
@@ -677,7 +691,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			dom_name = ob.name
 			if dom_name.startswith('_'):
 				dom_name = ''
-			if ob.parent and HasScripts(ob.parent):
+			if ob.parent and HasScript(ob.parent, 'c3'):
 				setup += [
 					'	objects[%s].position = {%s, %s};' %( idx, x + (cscale * 0.1), z - (cscale * 1.8) ),
 					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name ),
@@ -726,7 +740,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			#	setup.append('	html_css_int(objects[%s].id,"zIndex",-%s);' %( idx, int(ob.location.y * 10) ))
 			#elif ob.location.y <= -0.1:
 			#	setup.append('	html_css_int(objects[%s].id,"zIndex", %s);' %( idx, abs(int(ob.location.y * 10)) ))
-			if scripts or (ob.parent and HasScripts(ob.parent)):
+			if scripts or (ob.parent and HasScript(ob.parent, 'c3')):
 				draw.append('	self = objects[%s]; // %s' %( idx, ob.name ))
 			if scripts:
 				props = {}
@@ -747,7 +761,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 							#s = s.replace('self.'+prop, '%s_%s' %(sname,prop))
 							s = s.replace('self.' + prop, '%s_%s' %( prop, sname ))
 					draw.append('\t' + s)
-			if ob.parent != None and HasScripts(ob.parent):
+			if ob.parent != None and HasScript(ob.parent, 'c3'):
 				if prevParentName != ob.parent.name:
 					prevParentName = ob.parent.name
 					#draw.append('parent = objects[%s_id];' % GetSafeName(ob.parent))
@@ -758,13 +772,13 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 					#'self.position.y=parent.position.y;',
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
 				]
-		if ob.type in ( 'MESH', 'GREASEPENCIL', 'CURVE', 'FONT' ):
-			if not ob.name.startswith('_'):
-				if ob.c3_script_init:
-					setup += ['	{',
-						'	Object self=objects[%s_ID];' % sname.upper(),
-						ob.c3_script_init.as_string(),
-					'	}']
+		if ob.c3InitScript:
+			setup += ['	{',
+				'	Object self=objects[%s_ID];' % sname.upper(),
+				ob.c3InitScript.as_string(),
+			'	}']
+		for jsScript in GetScripts(ob, 'js'):
+			print(jsScript)
 	if global_v2arrays:
 		for gname in global_v2arrays:
 			head.append(global_v2arrays[gname])
@@ -1339,6 +1353,15 @@ function cstr_by_ptr (m, p)
 	return new TextDecoder().decode(b)
 }
 
+function random_vector_2d (maxDist)
+{
+	var offsetDist = Math.random() * maxDist;
+	var offsetAng = Math.random() * 2 * Math.PI;
+	var offsetX = Math.cos(offsetAng) * offsetDist;
+	var offsetY = Math.sin(offsetAng) * offsetDist;
+	return [ offsetX, offsetY ]
+}
+
 class api{
 	proxy(){
 		return make_environment(this)
@@ -1530,7 +1553,7 @@ raylib_like_api = {
 	}
 	''',
 	'DrawSvg' : '''
-	DrawSvg (position, size, color, hide, id, idLen, viewBox, pathData, pathDataLen, zIndex)
+	DrawSvg (position, size, color, hide, id, idLen, viewBox, pathData, pathDataLen, zIndex, cyclic)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const position_ = new Float32Array(buf, position, 2 * 4);
@@ -1538,7 +1561,16 @@ raylib_like_api = {
 		const color_ = new Uint8Array(buf, color, 4);
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		const viewBox_ = new Uint8Array(buf, viewBox, 4);
-		const pathData_ = new TextDecoder().decode(new Uint8Array(buf, pathData, pathDataLen));
+		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
+		var path = 'M' + (pathData_[0] - 128) + ',' + (pathData_[1] - 128) + ' ';
+		for (var i = 2; i < pathData_.length; i += 2)
+		{
+			if (i - 2 % 6 == 0)
+				path += 'C';
+			path += '' + (pathData_[i] - 128) + ',' + (pathData_[i + 1] - 128) + ' ';
+		}
+		if (cyclic)
+			path += 'Z';
 		var prefix = `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="` + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + '" style="position:absolute;z-index:' + zIndex + `">
   <g transform="scale(1 -1)">
     <g id="` + id_ + `" transform="scale(` + size_[0] + ' ' + size_[1] + `)">
@@ -1547,7 +1579,7 @@ raylib_like_api = {
     </g>
   </g>
 </svg>`;
-		document.documentElement.innerHTML = document.documentElement.innerHTML.replace('</script>', '</script>' + prefix + pathData_ + suffix);
+		document.documentElement.innerHTML = document.documentElement.innerHTML.replace('</script>', '</script>' + prefix + path + suffix);
 	}
 	''',
 	'SetSvgPath' : '''
@@ -1560,36 +1592,23 @@ raylib_like_api = {
 	}
 	''',
 	'RandomizeSvg' : '''
-	RandomizeSvg (id, idLen, initPathData, initPathDataLen, maxDist)
+	RandomizeSvg (id, idLen, initPathData, initPathDataLen, cyclic, maxDist)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		var id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
-		const initPathData_ = new TextDecoder().decode(new Uint8Array(buf, initPathData, initPathDataLen));
-		var vectors = initPathData_.split(' ');
-		var newPathData = '';
-		for (var i = 0; i < vectors.length; i ++)
+		const initPathData_ = new Uint8Array(buf, initPathData, initPathDataLen);
+		var offset = random_vector_2d(maxDist);
+		var path = 'M' + (initPathData_[0] - 128 + offset[0]) + ',' + (initPathData_[1] - 128 + offset[1]) + ' ';
+		for (var i = 2; i < initPathData_.length; i += 2)
 		{
-			var vector = vectors[i];
-			if (vector.length == 1)
-				newPathData += vector;
-			else
-			{
-				var components = vector.split(',');
-				var offsetDist = Math.random() * maxDist;
-				var offsetAng = Math.random() * 2 * Math.PI;
-				var offsetX = Math.cos(offsetAng) * offsetDist;
-				var offsetY = Math.sin(offsetAng) * offsetDist;
-				var x = parseFloat(components[0]);
-				if (isNaN(x))
-				{
-					newPathData += 'Z';
-					break;
-				}
-				var y = parseFloat(components[1]);
-				newPathData += '' + (x + offsetX) + ',' + (y + offsetY) + ' ';
-			}
+			var offset = random_vector_2d(maxDist);
+			if (i - 2 % 6 == 0)
+				path += 'C';
+			path += '' + (initPathData_[i] - 128 + offset[0]) + ',' + (initPathData_[i + 1] - 128 + offset[1]) + ' ';
 		}
-		document.getElementById(id_).children[0].setAttribute("d", newPathData);
+		if (cyclic)
+			path += 'Z';
+		document.getElementById(id_).children[0].setAttribute("d", path);
 	}
 	''',
 	'ClearBackground' : '''
@@ -1940,25 +1959,35 @@ bpy.types.GreasePencilv3.c3_grease_quantize = bpy.props.EnumProperty(
 	]
 )
 
-bpy.types.Object.c3_hide = bpy.props.BoolProperty(name = 'hidden on spawn')
-bpy.types.Object.c3_onclick = bpy.props.PointerProperty(name = 'on click script', type = bpy.types.Text)
-bpy.types.Object.c3_script_init = bpy.props.PointerProperty(name = 'init script', type = bpy.types.Text)
+bpy.types.Object.c3_hide = bpy.props.BoolProperty(name = 'Hide')
+bpy.types.Object.c3_onclick = bpy.props.PointerProperty(name = 'On click script', type = bpy.types.Text)
+bpy.types.Object.c3InitScript = bpy.props.PointerProperty(name = 'Init script', type = bpy.types.Text)
 
 for i in range(MAX_SCRIPTS_PER_OBJECT):
 	setattr(
 		bpy.types.Object,
-		'c3_script' + str(i),
-		bpy.props.PointerProperty(name = 'script%s' % i, type = bpy.types.Text),
+		'c3Script' + str(i),
+		bpy.props.PointerProperty(name = 'C3 Script%s' % i, type = bpy.types.Text),
 	)
 	setattr(
 		bpy.types.Object,
-		'c3_method' + str(i),
-		bpy.props.PointerProperty(name = 'method%s' % i, type = bpy.types.Text),
+		'jsScript' + str(i),
+		bpy.props.PointerProperty(name = 'JS Script%s' % i, type = bpy.types.Text),
 	)
 	setattr(
 		bpy.types.Object,
-		'c3_script%s_disable' %i,
-		bpy.props.BoolProperty(name = 'disable'),
+		'jsScriptInit' + str(i),
+		bpy.props.BoolProperty(name = 'Is init'),
+	)
+	setattr(
+		bpy.types.Object,
+		'c3Method' + str(i),
+		bpy.props.PointerProperty(name = 'Methods%s' % i, type = bpy.types.Text),
+	)
+	setattr(
+		bpy.types.Object,
+		'c3Script%sDisable' %i,
+		bpy.props.BoolProperty(name = 'Disable'),
 	)
 
 for i in range(MAX_OBJECTS_PER_TEXT):
@@ -1979,8 +2008,8 @@ for i in range(MAX_OBJECTS_PER_TEXT):
 	)
 	setattr(
 		bpy.types.Text,
-		'c3_init' + str(i),
-		bpy.props.PointerProperty(name='init script%s' % i, type = bpy.types.Text),
+		'c3Init' + str(i),
+		bpy.props.PointerProperty(name='Init script%s' % i, type = bpy.types.Text),
 	)
 
 bpy.types.Text.c3_extern = bpy.props.StringProperty(name = 'fn extern')
@@ -2008,17 +2037,17 @@ def MacroPointers (txt, object = None, v2arrays = {}):
 			assert ln.startswith('$Vector2[')
 			assert '=' not in ln
 			name = ln.split(';')[0].strip().split()[-1]
-			v2arrays[name] = ln[1:].replace(name, '%s_%s' %(name, GetSafeName(object)))
+			v2arrays[name] = ln[1:].replace(name, '%s_%s' %( name, GetSafeName(object) ))
 		else:
 			for name in v2arrays:
 				if '$' + name in ln:
-					ln = ln.replace('$' + name, '%s_%s' %(name, GetSafeName(object)))
+					ln = ln.replace('$' + name, '%s_%s' %( name, GetSafeName(object) ))
 			o.append(ln)
 	return '\n'.join(o)
 
 @bpy.utils.register_class
 class C3ScriptsPanel (bpy.types.Panel):
-	bl_idname = 'OBJECT_PT_C3_Scripts_Panel'
+	bl_idname = 'OBJECT_PT_c3Scripts_Panel'
 	bl_label = 'C3 Script Pointers'
 	bl_space_type = 'TEXT_EDITOR'
 	bl_region_type = 'UI'
@@ -2043,7 +2072,7 @@ class C3ScriptsPanel (bpy.types.Panel):
 			self.layout.prop(txt, 'c3_functions%s' % i)
 		self.layout.label(text = 'initialize scripts')
 		for i in range(MAX_OBJECTS_PER_TEXT):
-			self.layout.prop(txt, 'c3_init%s' % i)
+			self.layout.prop(txt, 'c3Init%s' % i)
 
 @bpy.utils.register_class
 class C3ObjectPanel (bpy.types.Panel):
@@ -2062,26 +2091,34 @@ class C3ObjectPanel (bpy.types.Panel):
 			self.layout.prop(ob.data, 'c3_grease_quantize')
 		self.layout.prop(ob, 'c3_hide')
 		self.layout.prop(ob, 'c3_onclick')
-		self.layout.label(text = 'Attach C3 Scripts')
-		self.layout.prop(ob, 'c3_script_init')
+		self.layout.label(text = 'C3 Scripts')
+		self.layout.prop(ob, 'c3InitScript')
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
 			hasProperty = (
-				getattr(ob, 'c3_script' + str(i)) != None
+				getattr(ob, 'c3Script' + str(i)) != None
 			)
 			if hasProperty or not foundUnassignedScript:
 				row = self.layout.row()
-				row.prop(ob, 'c3_script' + str(i))
-				row.prop(ob, 'c3_script%s_disable'%i)
+				row.prop(ob, 'c3Script' + str(i))
+				row.prop(ob, 'c3Script%sDisable' %i)
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
-			hasProperty = (
-				getattr(ob, 'c3_method' + str(i)) != None
-			)
+			hasProperty = getattr(ob, 'c3Method' + str(i)) != None
 			if hasProperty or not foundUnassignedScript:
-				self.layout.prop(ob, 'c3_method' + str(i))
+				self.layout.prop(ob, 'c3Method' + str(i))
+			if not foundUnassignedScript:
+				foundUnassignedScript = not hasProperty
+		self.layout.label(text = 'JS Scripts')
+		foundUnassignedScript = False
+		for i in range(MAX_SCRIPTS_PER_OBJECT):
+			hasProperty = getattr(ob, 'jsScript' + str(i)) != None
+			if hasProperty or not foundUnassignedScript:
+				row = self.layout.row()
+				row.prop(ob, 'jsScript' + str(i))
+				row.prop(ob, 'jsScript%sDisable' %i)
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 
