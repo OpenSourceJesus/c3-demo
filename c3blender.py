@@ -212,6 +212,12 @@ struct Object {
 	bool hide;
 }
 '''
+HEADER_EVENT = '''
+struct Event
+{
+	char[]* key;
+}
+'''
 HEADER_OBJECT_WASM = '''
 fn void Object.set_text(Object *obj, char *txt) {
 	html_set_text (obj.id, txt);
@@ -300,18 +306,18 @@ extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
 '''
 
-def GetScripts (ob, isMethod : bool):
+def GetScripts (ob, isAPI : bool):
 	scripts = []
 	type = 'runtime'
-	if isMethod:
-		type = 'method'
+	if isAPI:
+		type = 'api'
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
 		if getattr(ob, type + 'Script%sDisable' %i):
 			continue
 		txt = getattr(ob, type + 'Script' + str(i))
 		if txt != None:
-			if isMethod:
-				scripts.append(txt.as_string())
+			if isAPI:
+				scripts.append(( txt.as_string(), getattr(ob, 'jsScript' + str(i)) ))
 			else:
 				scripts.append(( txt.as_string(), getattr(ob, 'initScript' + str(i)) ))
 	return scripts
@@ -431,7 +437,7 @@ DEFAULT_COLOR = [ 0.5, 0.5, 0.5, 1 ]
 
 def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {}):
 	global WASM_EXTERN
-	global raylib_like_apiq
+	global JS_LIB_API_ENV
 	resX = world.c3_export_res_x
 	resY = world.c3_export_res_y
 	SCALE = world.c3_export_scale
@@ -439,7 +445,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	offY = world.c3_export_offset_y
 	off = Vector(( offX, offY ))
 	unpackers = {}
-	head = [ HEADER, HEADER_OBJECT ]
+	head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
 	setup = [ 'fn void main() @extern("main") @wasm {' ]
 	global_funcs = {}
 	main_init = {}
@@ -460,29 +466,60 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	if wasm:
 		head.append(HEADER_OBJECT_WASM)
 		for ob in bpy.data.objects:
-			for script in GetScripts(ob, True):
-				indexOfArgsStart = script.find('(')
-				indexOfArgsEnd = script.find(')', indexOfArgsStart)
-				args = script[indexOfArgsStart : indexOfArgsEnd]
-				argsList = args.split(', ')
-				methodName = script[: indexOfArgsStart - 1]
-				newMethodName = ''
-				argNum = 0
-				for char in methodName:
-					if argNum > 0 and char.isupper():
-						newMethodName += '_'
-					newMethodName += char.lower()
-					argNum += 1
-				argsNames = ''
-				for arg in argsList:
-					argsNames += arg.split(' ')[1] + ','
-				argsNames = argsNames[: -1]
-				wasmExternTxt = 'extern fn void ' + newMethodName + args
-				jsTxt = script[: indexOfArgsStart] + ' ('
-				jsTxt += argsNames + script[indexOfArgsEnd :]
-				wasmExternTxt += ')  @extern("' + methodName + '");'
-				WASM_EXTERN += wasmExternTxt + '\n'
-				raylib_like_api[methodName] = jsTxt + '\n'
+			for scriptInfo in GetScripts(ob, True):
+				script = scriptInfo[0]
+				isJs = scriptInfo[1]
+				if isJs:
+					JS_LIB_API_ENV += script
+					continue
+				elif '(' not in script:
+					WASM_EXTERN += script
+				else:
+					lns = script.split('\n')
+					skip = False
+					currentMethod = ''
+					for ln in lns:
+						if '{' in ln:
+							skip = True
+						if not skip:
+							indexOfArgsStart = ln.find('(')
+							if indexOfArgsStart == -1:
+								WASM_EXTERN += ln + '\n'
+								currentMethod += ln + '\n'
+								continue
+							indexOfArgsEnd = ln.find(')')
+							args = ln[indexOfArgsStart : indexOfArgsEnd]
+							argsList = args.split(', ')
+							indexOfMethodNameEnd = ln.rfind(' ', 0, indexOfArgsStart)
+							if indexOfMethodNameEnd == -1:
+								indexOfMethodNameEnd = indexOfArgsStart
+							methodName = ln[: indexOfMethodNameEnd]
+							newMethodName = ''
+							argNum = 0
+							for char in methodName:
+								if argNum > 0 and char.isupper():
+									newMethodName += '_'
+								newMethodName += char.lower()
+								argNum += 1
+							argsNames = ''
+							for arg in argsList:
+								argNameAndValue = arg.split(' ')
+								if len(argNameAndValue) == 2:
+									argsNames += argNameAndValue[1] + ','
+							argsNames = argsNames[: -1]
+							if len(argsNames) == 0:
+								currentMethod = ln + '\n'
+							else:
+								currentMethod = ln.replace(args[1 :], argsNames) + '\n'
+							wasmExternTxt = 'extern fn void ' + newMethodName + ' ' + args
+							wasmExternTxt += ') @extern("' + methodName + '");'
+							WASM_EXTERN += wasmExternTxt + '\n'
+						else:
+							currentMethod += ln + '\n'
+							if '}' in ln:
+								raylib_like_api[methodName] = currentMethod
+								currentMethod = ''
+								skip = False
 			for scriptInfo in GetScripts(ob, False):
 				script = scriptInfo[0]
 				isInit = scriptInfo[1]
@@ -1673,6 +1710,8 @@ def GenJsAPI (world, c3, user_methods):
 		skip.append('GetScreenHeight')
 	if 'draw_svg' not in c3:
 		skip.append('DrawSvg')
+	if 'randomize_svg' not in c3:
+		skip.append('RandomizeSvg')
 	if world.c3_js13kb:
 		js = [ JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
@@ -1859,7 +1898,7 @@ def BuildWasm (world):
 					out += '.zip'
 				_BUILD_INFO['zip'] = out
 				print('saving:', out)
-				open(out,'wb').write(zip)
+				open(out, 'wb').write(zip)
 			else:
 				_BUILD_INFO['zip'] = '/tmp/index.html.zip'
 		else:
@@ -1932,13 +1971,18 @@ bpy.types.Object.c3_hide = bpy.props.BoolProperty(name = 'Hide')
 for i in range(MAX_SCRIPTS_PER_OBJECT):
 	setattr(
 		bpy.types.Object,
-		'methodScript' + str(i),
-		bpy.props.PointerProperty(name = 'Method script%s' % i, type = bpy.types.Text),
+		'apiScript' + str(i),
+		bpy.props.PointerProperty(name = 'API script%s' % i, type = bpy.types.Text),
 	)
 	setattr(
 		bpy.types.Object,
-		'methodScript%sDisable' %i,
+		'apiScript%sDisable' %i,
 		bpy.props.BoolProperty(name = 'Disable'),
+	)
+	setattr(
+		bpy.types.Object,
+		'jsScript' + str(i),
+		bpy.props.BoolProperty(name = 'JS only'),
 	)
 	setattr(
 		bpy.types.Object,
@@ -1972,15 +2016,15 @@ class ScriptsPanel (bpy.types.Panel):
 			self.layout.prop(ob.data, 'c3_grease_optimize')
 			self.layout.prop(ob.data, 'c3_grease_quantize')
 		self.layout.prop(ob, 'c3_hide')
-		self.layout.prop(ob, 'c3_onclick')
 		self.layout.label(text = 'Scripts')
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
-			hasProperty = getattr(ob, 'methodScript' + str(i)) != None
+			hasProperty = getattr(ob, 'apiScript' + str(i)) != None
 			if hasProperty or not foundUnassignedScript:
 				row = self.layout.row()
-				row.prop(ob, 'methodScript' + str(i))
-				row.prop(ob, 'methodScript%sDisable' %i)
+				row.prop(ob, 'apiScript' + str(i))
+				row.prop(ob, 'jsScript' + str(i))
+				row.prop(ob, 'apiScript%sDisable' + str(i))
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 		foundUnassignedScript = False
