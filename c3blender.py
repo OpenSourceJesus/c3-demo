@@ -152,7 +152,6 @@ if __name__ == '__main__':
 
 # blender #
 MAX_SCRIPTS_PER_OBJECT = 8
-MAX_OBJECTS_PER_TEXT = 4
 if not bpy:
 	if isLinux:
 		if not os.path.isfile('/usr/bin/blender'):
@@ -301,17 +300,26 @@ extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
 '''
 
-def GetScripts (ob, type : str):
+def GetScripts (ob, isMethod : bool):
 	scripts = []
+	type = 'runtime'
+	if isMethod:
+		type = 'method'
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
-		if getattr(ob, 'c3Script%sDisable' %i):
+		if getattr(ob, type + 'Script%sDisable' %i):
 			continue
 		txt = getattr(ob, type + 'Script' + str(i))
 		if txt != None:
-			scripts.append(MacroPointers(txt, ob))
+			if isMethod:
+				scripts.append(txt.as_string())
+			else:
+				scripts.append(( txt.as_string(), getattr(ob, 'initScript' + str(i)) ))
 	return scripts
 
-def HasScript (ob, type : str):
+def HasScript (ob, isMethod : bool):
+	type = 'runtime'
+	if isMethod:
+		type = 'method'
 	for i in range(MAX_SCRIPTS_PER_OBJECT):
 		txt = getattr(ob, type + 'Script' + str(i))
 		if txt != None:
@@ -422,16 +430,66 @@ def GetCurveBoundsMinMax (ob):
 DEFAULT_COLOR = [ 0.5, 0.5, 0.5, 1 ]
 
 def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {}):
+	global WASM_EXTERN
+	global raylib_like_apiq
 	resX = world.c3_export_res_x
 	resY = world.c3_export_res_y
 	SCALE = world.c3_export_scale
 	offX = world.c3_export_offset_x
 	offY = world.c3_export_offset_y
-	off = Vector((offX, offY))
+	off = Vector(( offX, offY ))
 	unpackers = {}
 	head = [ HEADER, HEADER_OBJECT ]
+	setup = [ 'fn void main() @extern("main") @wasm {' ]
+	global_funcs = {}
+	main_init = {}
+	drawHeader = [
+		'fn void game_frame() @extern("$") @wasm {',
+	]
+	draw  = [
+		#'fn void game_frame() @extern("$") @wasm {',
+		#'	Object self;',
+		#'	Object parent;',
+		#'	float delta_time = raylib::get_frame_time();',
+	]
+	if wasm:
+		draw.append('	html_canvas_clear();')
+	else:
+		draw.append('	raylib::begin_drawing();')
+		draw.append('	raylib::clear_background({ 0xFF, 0xFF, 0xFF, 0xFF });')
 	if wasm:
 		head.append(HEADER_OBJECT_WASM)
+		for ob in bpy.data.objects:
+			for script in GetScripts(ob, True):
+				indexOfArgsStart = script.find('(')
+				indexOfArgsEnd = script.find(')', indexOfArgsStart)
+				args = script[indexOfArgsStart : indexOfArgsEnd]
+				argsList = args.split(', ')
+				methodName = script[: indexOfArgsStart - 1]
+				newMethodName = ''
+				argNum = 0
+				for char in methodName:
+					if argNum > 0 and char.isupper():
+						newMethodName += '_'
+					newMethodName += char.lower()
+					argNum += 1
+				argsNames = ''
+				for arg in argsList:
+					argsNames += arg.split(' ')[1] + ','
+				argsNames = argsNames[: -1]
+				wasmExternTxt = 'extern fn void ' + newMethodName + args
+				jsTxt = script[: indexOfArgsStart] + ' ('
+				jsTxt += argsNames + script[indexOfArgsEnd :]
+				wasmExternTxt += ')  @extern("' + methodName + '");'
+				WASM_EXTERN += wasmExternTxt + '\n'
+				raylib_like_api[methodName] = jsTxt + '\n'
+			for scriptInfo in GetScripts(ob, False):
+				script = scriptInfo[0]
+				isInit = scriptInfo[1]
+				if isInit:
+					setup.append(script)
+				else:
+					draw.append(script)
 		if world.c3_miniapi:
 			s = WASM_EXTERN
 			for fname in c3dom_api_mini:
@@ -448,33 +506,6 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 		else:
 			head.append(WASM_EXTERN)
 		head.append(WASM_HELPERS)
-	setup = [ 'fn void main() @extern("main") @wasm {' ]
-	global_funcs = {}
-	main_init = {}
-	for txt in bpy.data.texts:
-		for i in range(MAX_OBJECTS_PER_TEXT):
-			ftxt = getattr(txt, 'c3_functions%s' % i)
-			if ftxt and ftxt.name not in global_funcs:
-				global_funcs[ftxt.name]=ftxt
-				head.append(ftxt.as_string())
-			itxt = getattr(txt, 'c3Init%s' % i)
-			if itxt and itxt.name not in main_init:
-				main_init[itxt.name] = itxt
-				setup.append(itxt.as_string())
-	drawHeader = [
-		'fn void game_frame() @extern("$") @wasm {',
-	]
-	draw  = [
-		#'fn void game_frame() @extern("$") @wasm {',
-		#'	Object self;',
-		#'	Object parent;',
-		#'	float delta_time = raylib::get_frame_time();',
-	]
-	if wasm:
-		draw.append('	html_canvas_clear();')
-	else:
-		draw.append('	raylib::begin_drawing();')
-		draw.append('	raylib::clear_background({ 0xFF, 0xFF, 0xFF, 0xFF });')
 	global_v2arrays = {}
 	meshes = []
 	curves = []
@@ -504,42 +535,6 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 				#head.append('short %s_id=%s;' %(sname,idx))
 				head.append('const short %s_ID = %s;' %(sname.upper(), idx))
 		scripts = []
-		for i in range(MAX_SCRIPTS_PER_OBJECT):
-			txt = getattr(ob, "c3Script" + str(i))
-			if txt:
-				if not getattr(ob, "c3Script%sDisable" %i):
-					scripts.append(MacroPointers(txt, ob, global_v2arrays))
-			txt = getattr(ob, "c3Method" + str(i))
-			if txt and txt.name not in methods:
-				tname = txt.name
-				assert '(' in tname
-				assert tname.endswith(')')
-				fname, args = tname.split('(')
-				exdef = txt.c3_extern
-				if not exdef.startswith('extern') and not exdef.startswith('fn'):
-					exdef = 'fn ' + exdef
-				if not exdef.startswith('extern'):
-					exdef = 'extern ' + exdef
-				if not exdef.endswith(';'):
-					exdef += ';'
-				args_def = exdef.split('@')[0].split('(')[-1].split(')')[0]
-				assert fname + '(' in exdef
-				exdef = exdef.replace(fname + '(', '%s(int _eltid,' %fname)
-				head.append(exdef)
-				args = args[: -1] # strip )
-				head += [
-
-					'fn void Object.%s(Object *_obj, %s) {' %(fname, args_def),
-					'	%s(_obj.id, %s);' %(fname, args),
-					'}', 
-				]
-				if '@extern("' in txt.c3_extern:
-					tname = txt.c3_extern.split('@extern("')[-1].split('"')[0]
-					if len(tname) < 2:
-						print(txt)
-						raise SyntaxError('@extern names must be at least two characters: %s' %txt.c3_extern)
-					tname += '(' + txt.name.split('(')[-1]
-				methods[tname] = MacroPointers(txt, ob, global_v2arrays)
 		if ob.type == "MESH":
 			meshes.append(ob)
 			setup.append('	objects[%s].position = {%s,%s};' %(idx, x, z))
@@ -585,7 +580,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 					draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
 		elif ob.type == 'GREASEPENCIL':
 			meshes.append(ob)
-			if HasScript(ob, 'c3'):
+			if HasScript(ob, False):
 				setup.append('	objects[%s].position = { %s, %s };' %( idx, x, z ))
 				sx, sy, sz = ob.scale
 				setup.append('	objects[%s].scale = { %s, %s };' %( idx, sx, sz ))
@@ -691,7 +686,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			dom_name = ob.name
 			if dom_name.startswith('_'):
 				dom_name = ''
-			if ob.parent and HasScript(ob.parent, 'c3'):
+			if ob.parent and HasScript(ob.parent, False):
 				setup += [
 					'	objects[%s].position = {%s, %s};' %( idx, x + (cscale * 0.1), z - (cscale * 1.8) ),
 					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name ),
@@ -714,23 +709,6 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 				setup += [
 					'	objects[%s].css_scale_y(%s);' %(idx, ob.scale.y),
 				]
-			if ob.c3_onclick:
-				tname = GetSafeName(ob.c3_onclick)
-				if wasm and ascii_letters:
-					head += [
-						'fn void _onclick_%s(int _index_) @extern("%s") {' %( tname, ascii_letters.pop() ),
-						'	Object self = objects[_index_];',
-						MacroPointers(ob.c3_onclick, ob, global_v2arrays),
-						'}',
-					]
-				else:
-					head += [
-						'fn void _onclick_%s(int _index_){' % tname,
-						'	Object self = objects[_index_];',
-						MacroPointers(ob.c3_onclick, ob, global_v2arrays),
-						'}',
-					]
-				setup.append('	html_bind_onclick(objects[%s].id, &_onclick_%s, %s);' %( idx, tname, idx ))
 			if ob.location.y >= 0.1:
 				setup.append('	html_css_zindex(objects[%s].id, -%s);' %( idx, int(ob.location.y * 10) ))
 			elif ob.location.y <= -0.1:
@@ -740,7 +718,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			#	setup.append('	html_css_int(objects[%s].id,"zIndex",-%s);' %( idx, int(ob.location.y * 10) ))
 			#elif ob.location.y <= -0.1:
 			#	setup.append('	html_css_int(objects[%s].id,"zIndex", %s);' %( idx, abs(int(ob.location.y * 10)) ))
-			if scripts or (ob.parent and HasScript(ob.parent, 'c3')):
+			if scripts or (ob.parent and HasScript(ob.parent, False)):
 				draw.append('	self = objects[%s]; // %s' %( idx, ob.name ))
 			if scripts:
 				props = {}
@@ -761,7 +739,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 							#s = s.replace('self.'+prop, '%s_%s' %(sname,prop))
 							s = s.replace('self.' + prop, '%s_%s' %( prop, sname ))
 					draw.append('\t' + s)
-			if ob.parent != None and HasScript(ob.parent, 'c3'):
+			if ob.parent != None and HasScript(ob.parent, False):
 				if prevParentName != ob.parent.name:
 					prevParentName = ob.parent.name
 					#draw.append('parent = objects[%s_id];' % GetSafeName(ob.parent))
@@ -772,13 +750,6 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 					#'self.position.y=parent.position.y;',
 					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
 				]
-		if ob.c3InitScript:
-			setup += ['	{',
-				'	Object self=objects[%s_ID];' % sname.upper(),
-				ob.c3InitScript.as_string(),
-			'	}']
-		for jsScript in GetScripts(ob, 'js'):
-			print(jsScript)
 	if global_v2arrays:
 		for gname in global_v2arrays:
 			head.append(global_v2arrays[gname])
@@ -1705,13 +1676,10 @@ def GenJsAPI (world, c3, user_methods):
 	if world.c3_js13kb:
 		js = [ JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
-		js = [
-			JS_LIB_API_ENV,
-			JS_LIB_API,
-		]
+		js = [ JS_LIB_API_ENV, JS_LIB_API ]
 	for fname in raylib_like_api:
 		if fname in skip:
-			print('skipping:', fname)
+			print('Skipping:', fname)
 			continue
 		if world.c3_miniapi:
 			if fname in raylib_like_api_mini:
@@ -1728,13 +1696,13 @@ def GenJsAPI (world, c3, user_methods):
 			if scall in c3:
 				used = True
 		if used:
-			print('used:', fname)
+			print('Used:', fname)
 			if world.c3_miniapi:
 				js.append(c3dom_api_mini[fname]['code'])
 			else:
 				js.append(c3dom_api[fname])
 		else:
-			print('skipping:', fname)
+			print('Skipping:', fname)
 	for fname in user_methods:
 		fudge = fname.replace('(', '(_,')
 		js += [
@@ -1960,124 +1928,38 @@ bpy.types.GreasePencilv3.c3_grease_quantize = bpy.props.EnumProperty(
 )
 
 bpy.types.Object.c3_hide = bpy.props.BoolProperty(name = 'Hide')
-bpy.types.Object.c3_onclick = bpy.props.PointerProperty(name = 'On click script', type = bpy.types.Text)
-bpy.types.Object.c3InitScript = bpy.props.PointerProperty(name = 'Init script', type = bpy.types.Text)
 
 for i in range(MAX_SCRIPTS_PER_OBJECT):
 	setattr(
 		bpy.types.Object,
-		'c3Script' + str(i),
-		bpy.props.PointerProperty(name = 'C3 Script%s' % i, type = bpy.types.Text),
+		'methodScript' + str(i),
+		bpy.props.PointerProperty(name = 'Method script%s' % i, type = bpy.types.Text),
 	)
 	setattr(
 		bpy.types.Object,
-		'jsScript' + str(i),
-		bpy.props.PointerProperty(name = 'JS Script%s' % i, type = bpy.types.Text),
-	)
-	setattr(
-		bpy.types.Object,
-		'jsScriptInit' + str(i),
-		bpy.props.BoolProperty(name = 'Is init'),
-	)
-	setattr(
-		bpy.types.Object,
-		'c3Method' + str(i),
-		bpy.props.PointerProperty(name = 'Methods%s' % i, type = bpy.types.Text),
-	)
-	setattr(
-		bpy.types.Object,
-		'c3Script%sDisable' %i,
+		'methodScript%sDisable' %i,
 		bpy.props.BoolProperty(name = 'Disable'),
 	)
-
-for i in range(MAX_OBJECTS_PER_TEXT):
 	setattr(
-		bpy.types.Text,
-		'object' + str(i),
-		bpy.props.PointerProperty(name='object%s' % i, type = bpy.types.Object),
+		bpy.types.Object,
+		'runtimeScript' + str(i),
+		bpy.props.PointerProperty(name = 'Runtime script%s' % i, type = bpy.types.Text),
 	)
 	setattr(
-		bpy.types.Text,
-		'color' + str(i),
-		bpy.props.FloatVectorProperty(name='color%s' % i, subtype = 'COLOR'),
+		bpy.types.Object,
+		'runtimeScript%sDisable' %i,
+		bpy.props.BoolProperty(name = 'Disable'),
 	)
 	setattr(
-		bpy.types.Text,
-		'c3_functions' + str(i),
-		bpy.props.PointerProperty(name='function script%s' % i, type = bpy.types.Text),
+		bpy.types.Object,
+		'initScript' + str(i),
+		bpy.props.BoolProperty(name = 'Is init'),
 	)
-	setattr(
-		bpy.types.Text,
-		'c3Init' + str(i),
-		bpy.props.PointerProperty(name='Init script%s' % i, type = bpy.types.Text),
-	)
-
-bpy.types.Text.c3_extern = bpy.props.StringProperty(name = 'fn extern')
-
-def MacroPointers (txt, object = None, v2arrays = {}):
-	t = txt.as_string()
-	for i in range(MAX_OBJECTS_PER_TEXT):
-		tag = 'object%s' % i
-		ob = getattr(txt, tag)
-		if '$' + tag + '.' in t:
-			if not ob:
-				raise RuntimeError('%s text object pointer not set: %s' %(txt, tag) )
-			t = t.replace('$' + tag + '.', 'objects[%s_ID].' % GetSafeName(ob).upper())
-		elif '$' + tag in t:
-			if not ob:
-				raise RuntimeError('%s text object pointer not set: %s' %(txt, tag) )
-			t = t.replace('$' + tag, ob.name)  # only works inside of quotes in html dom
-		tag = 'color%s' % i
-		clr = getattr(txt, tag)
-		if '$' + tag in t:
-			t = t.replace('$' + tag, ','.join([str(v) for v in clr]))
-	o = []
-	for ln in t.splitlines():
-		if ln.startswith('$Vector2'):
-			assert ln.startswith('$Vector2[')
-			assert '=' not in ln
-			name = ln.split(';')[0].strip().split()[-1]
-			v2arrays[name] = ln[1:].replace(name, '%s_%s' %( name, GetSafeName(object) ))
-		else:
-			for name in v2arrays:
-				if '$' + name in ln:
-					ln = ln.replace('$' + name, '%s_%s' %( name, GetSafeName(object) ))
-			o.append(ln)
-	return '\n'.join(o)
 
 @bpy.utils.register_class
-class C3ScriptsPanel (bpy.types.Panel):
-	bl_idname = 'OBJECT_PT_c3Scripts_Panel'
-	bl_label = 'C3 Script Pointers'
-	bl_space_type = 'TEXT_EDITOR'
-	bl_region_type = 'UI'
-
-	def draw (self, context):
-		txt = context.space_data.text
-		if txt:
-			self.layout.label(text = txt.name)
-		else:
-			self.layout.label(text = '(no text)')
-			return
-		if txt.name.endswith(')'):
-			self.layout.prop(txt, 'c3_extern')
-		self.layout.label(text = 'object pointers')
-		for i in range(MAX_OBJECTS_PER_TEXT):
-			self.layout.prop(txt, 'object%s' % i)
-		self.layout.label(text = 'color pointers')
-		for i in range(MAX_OBJECTS_PER_TEXT):
-			self.layout.prop(txt, 'color%s' % i)
-		self.layout.label(text = 'include functions')
-		for i in range(MAX_OBJECTS_PER_TEXT):
-			self.layout.prop(txt, 'c3_functions%s' % i)
-		self.layout.label(text = 'initialize scripts')
-		for i in range(MAX_OBJECTS_PER_TEXT):
-			self.layout.prop(txt, 'c3Init%s' % i)
-
-@bpy.utils.register_class
-class C3ObjectPanel (bpy.types.Panel):
-	bl_idname = 'OBJECT_PT_C3_Object_Panel'
-	bl_label = 'C3 Object Options'
+class ScriptsPanel (bpy.types.Panel):
+	bl_idname = 'OBJECT_PT_Object_Panel'
+	bl_label = 'Scripts'
 	bl_space_type = 'PROPERTIES'
 	bl_region_type = 'WINDOW'
 	bl_context = 'object'
@@ -2091,34 +1973,24 @@ class C3ObjectPanel (bpy.types.Panel):
 			self.layout.prop(ob.data, 'c3_grease_quantize')
 		self.layout.prop(ob, 'c3_hide')
 		self.layout.prop(ob, 'c3_onclick')
-		self.layout.label(text = 'C3 Scripts')
-		self.layout.prop(ob, 'c3InitScript')
+		self.layout.label(text = 'Scripts')
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
-			hasProperty = (
-				getattr(ob, 'c3Script' + str(i)) != None
-			)
+			hasProperty = getattr(ob, 'methodScript' + str(i)) != None
 			if hasProperty or not foundUnassignedScript:
 				row = self.layout.row()
-				row.prop(ob, 'c3Script' + str(i))
-				row.prop(ob, 'c3Script%sDisable' %i)
+				row.prop(ob, 'methodScript' + str(i))
+				row.prop(ob, 'methodScript%sDisable' %i)
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
-			hasProperty = getattr(ob, 'c3Method' + str(i)) != None
-			if hasProperty or not foundUnassignedScript:
-				self.layout.prop(ob, 'c3Method' + str(i))
-			if not foundUnassignedScript:
-				foundUnassignedScript = not hasProperty
-		self.layout.label(text = 'JS Scripts')
-		foundUnassignedScript = False
-		for i in range(MAX_SCRIPTS_PER_OBJECT):
-			hasProperty = getattr(ob, 'jsScript' + str(i)) != None
+			hasProperty = getattr(ob, 'runtimeScript' + str(i)) != None
 			if hasProperty or not foundUnassignedScript:
 				row = self.layout.row()
-				row.prop(ob, 'jsScript' + str(i))
-				row.prop(ob, 'jsScript%sDisable' %i)
+				row.prop(ob, 'runtimeScript' + str(i))
+				row.prop(ob, 'initScript' + str(i))
+				row.prop(ob, 'runtimeScript%sDisable' %i)
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 
