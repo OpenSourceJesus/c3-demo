@@ -281,7 +281,7 @@ extern fn float random () @extern("random");
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* position, Vector2* size, Color* color, bool hide, char[]* id, int idLen, char[4]* viewBox, char[]* pathData, int pathDataLen, int zIndex, bool cyclic) @extern("DrawSvg");
+extern fn void draw_svg (Vector2* position, Vector2* size, Color* color, bool hide, char[]* id, int idLen, char[4]* viewBox, char[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide) @extern("DrawSvg");
 extern fn void set_svg_path (char[]* id, int idLen, char[]* pathData, int pathDataLen) @extern("SetSvgPath");
 extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, bool cyclic, float maxDist) @extern("RandomizeSvg");
 
@@ -588,8 +588,9 @@ def ExportObject (ob):
 		head.append('const char[%s] ID_%s = %s;' %( idDataLen, sname.upper(), idData ))
 		cyclic = ob.data.splines[0].use_cyclic_u
 		isCyclicStr = str(cyclic).lower()
-		setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[4]*) &%s, (char[]*) &%s, %s, %s, %s);'
-			%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'VIEW_BOX_' + sname.upper(), 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr ))
+		collideStr = str(ob.collide).lower()
+		setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[4]*) &%s, (char[]*) &%s, %s, %s, %s, %s);'
+			%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'VIEW_BOX_' + sname.upper(), 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr ))
 		draw.append('	randomize_svg((char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, isCyclicStr, 0.3 ))
 	elif ob.type == 'FONT' and wasm:
 		cscale = ob.data.size * SCALE
@@ -600,7 +601,7 @@ def ExportObject (ob):
 			return
 		meshes.append(ob)
 		hide = 'false'
-		if ob.c3_hide:
+		if ob.hide:
 			setup.append('	objects[%s].hide = true;' %idx)
 			hide = 'true'
 		if ob.parent:
@@ -679,12 +680,14 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	global head
 	global draw
 	global setup
+	global datas
 	global meshes
 	global curves
 	global svgText
 	global exportedObs
 	global userWasmExtern
 	global userJsLibAPIEnv
+	exportedObs = []
 	userWasmExtern = ''
 	userJsLibAPIEnv = ''
 	resX = world.c3_export_res_x
@@ -699,6 +702,9 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	drawHeader = [
 		'fn void game_frame() @extern("$") @wasm {',
 	]
+	head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
+	setup = [ 'fn void main() @extern("main") @wasm {' ]
+	draw = []
 	if wasm:
 		draw.append('	html_canvas_clear();')
 	else:
@@ -717,12 +723,12 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 					userWasmExtern += script
 				else:
 					lns = script.split('\n')
-					skip = False
+					bracketTier = 0
 					currentMethod = ''
 					for ln in lns:
 						if '{' in ln:
-							skip = True
-						if not skip:
+							bracketTier += 1
+						if bracketTier == 0:
 							indexOfArgsStart = ln.find('(')
 							if indexOfArgsStart == -1:
 								userWasmExtern += ln + '\n'
@@ -758,9 +764,10 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 						else:
 							currentMethod += ln + '\n'
 							if '}' in ln:
-								raylib_like_api[methodName] = currentMethod
-								currentMethod = ''
-								skip = False
+								bracketTier -= 1
+								if bracketTier == 0:
+									raylib_like_api[methodName] = currentMethod
+									currentMethod = ''
 			for scriptInfo in GetScripts(ob, False):
 				script = scriptInfo[0]
 				isInit = scriptInfo[1]
@@ -1350,6 +1357,14 @@ function make_environment(e){
 		}
 	});
 }
+function overlaps (bBox, bBox2)
+{
+	var maxX = bBox.x + bBox.width;
+	var maxY = bBox.y + bBox.height;
+	var maxX2 = bBox2.x + bBox2.width;
+	var maxY2 = bBox2.y + bBox2.height;
+	return bBox.x > maxX2 && maxX < bBox2.x && bBox.y > maxY2 && maxY < bBox2.y;
+}
 (function (root, ns, factory) {
     "use strict";
 
@@ -1461,12 +1476,10 @@ function make_environment(e){
             head = document.getElementsByTagName('head')[0];
             style = document.createElement('style');
             head.appendChild(style);
-
             div = document.createElement('div');
             div.className = 'mediaQueryBinarySearch';
             div.style.display = 'none';
             document.body.appendChild(div);
-
             matchMedia = function (query) {
                 style.sheet.insertRule('@media ' + query + '{.mediaQueryBinarySearch ' + '{text-decoration: underline} }', 0);
                 var matched = getComputedStyle(div, null).textDecoration == 'underline';
@@ -1757,7 +1770,7 @@ raylib_like_api = {
 	}
 	''',
 	'DrawSvg' : '''
-	DrawSvg (position, size, color, hide, id, idLen, viewBox, pathData, pathDataLen, zIndex, cyclic)
+	DrawSvg (position, size, color, hide, id, idLen, viewBox, pathData, pathDataLen, zIndex, cyclic, collide)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const position_ = new Float32Array(buf, position, 2 * 4);
@@ -1775,7 +1788,7 @@ raylib_like_api = {
 		}
 		if (cyclic)
 			path += 'Z';
-		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + '" viewBox="' + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + '" style="overflow:hidden;top:0;right:0;bottom:0;left:0;max-width:100vw;max-height:100vh;position:absolute;z-index:' + zIndex + `">
+		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + '" viewBox="' + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + '" style="overflow:hidden;top:0;right:0;bottom:0;left:0;max-width:100vw;max-height:100vh;position:absolute;z-index:' + zIndex + '" collide="' + collide + `">
     <g transform="scale(` + size_[0] + ' ' + -size_[1] + `)translate(0 0)">
       <path id="Material" style="fill:rgb(` + color_[0] + ' ' + color_[1] + ' ' + color_[2] + `)" d="`;
 		var suffix = `"/>
@@ -2193,7 +2206,8 @@ bpy.types.GreasePencilv3.c3_grease_quantize = bpy.props.EnumProperty(
 	]
 )
 
-bpy.types.Object.c3_hide = bpy.props.BoolProperty(name = 'Hide')
+bpy.types.Object.hide = bpy.props.BoolProperty(name = 'Hide')
+bpy.types.Object.collide = bpy.props.BoolProperty(name = 'Collide')
 
 for i in range(MAX_SCRIPTS_PER_OBJECT):
 	setattr(
@@ -2230,7 +2244,7 @@ for i in range(MAX_SCRIPTS_PER_OBJECT):
 @bpy.utils.register_class
 class ScriptsPanel (bpy.types.Panel):
 	bl_idname = 'OBJECT_PT_Object_Panel'
-	bl_label = 'Scripts'
+	bl_label = 'Object'
 	bl_space_type = 'PROPERTIES'
 	bl_region_type = 'WINDOW'
 	bl_context = 'object'
@@ -2242,7 +2256,8 @@ class ScriptsPanel (bpy.types.Panel):
 		if ob.type == 'GPENCIL':
 			self.layout.prop(ob.data, 'c3_grease_optimize')
 			self.layout.prop(ob.data, 'c3_grease_quantize')
-		self.layout.prop(ob, 'c3_hide')
+		self.layout.prop(ob, 'hide')
+		self.layout.prop(ob, 'collide')
 		self.layout.label(text = 'Scripts')
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
