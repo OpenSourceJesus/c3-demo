@@ -304,6 +304,8 @@ extern fn void html_eval (char *ptr) @extern("html_eval");
 
 extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
+
+extern fn void add_group (char[]* id, int idLen, char[]* firstAndLastChildIds, int firstAndLastChildIdsLen) @extern("AddGroup");
 '''
 
 def GetScripts (ob, isAPI : bool):
@@ -434,10 +436,293 @@ def GetCurveBoundsMinMax (ob):
 	return _min, _max
 
 DEFAULT_COLOR = [ 0.5, 0.5, 0.5, 1 ]
+exportedObs = []
+meshes = []
+curves = []
+datas = {}
+head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
+setup = [ 'fn void main() @extern("main") @wasm {' ]
+draw  = [
+	#'fn void game_frame() @extern("$") @wasm {',
+	#'	Object self;',
+	#'	Object parent;',
+	#'	float delta_time = raylib::get_frame_time();',
+]
+svgText = ''
+userWasmExtern = ''
+userJsLibAPIEnv = ''
+
+def ExportObject (ob):
+	global head
+	global draw
+	global setup
+	global datas
+	global meshes
+	global curves
+	global svgText
+	global exportedObs
+	if ob.hide_get() or ob in exportedObs:
+		return
+	world = bpy.data.worlds[0]
+	resX = world.c3_export_res_x
+	resY = world.c3_export_res_y
+	SCALE = world.c3_export_scale
+	offX = world.c3_export_offset_x
+	offY = world.c3_export_offset_y
+	off = Vector(( offX, offY ))
+	sname = GetSafeName(ob)
+	x, y, z = ob.location * SCALE
+	y = -y
+	z = -z
+	x += offX
+	y += offY
+	z += offY
+	sx, sy, sz = ob.scale * SCALE
+	idx = len(meshes + curves)
+	if ob.type in ( 'MESH', 'GREASEPENCIL', 'CURVE', 'FONT' ):
+		if not ob.name.startswith('_'):
+			#head.append('short %s_id=%s;' %( sname, idx ))
+			head.append('const short %s_ID = %s;' %(sname.upper(), idx))
+	scripts = []
+	if ob.type == 'EMPTY':
+		idData, idDataLen = ToC3(ob.name)
+		head.append('const char[%s] ID_%s = %s;' %( idDataLen, sname.upper(), idData ))
+		firstAndLastChildIdsTxt = ''
+		firstAndLastChildIdsTxt += str(ob.children[0].name) + ',' + str(ob.children[-1].name)
+		firstAndLastChildIdsData, firstAndLastChildIdsDataLen = ToC3(firstAndLastChildIdsTxt)
+		head.append('const char[%s] FIRST_AND_LAST_CHILD_IDS_%s = %s;' %( firstAndLastChildIdsDataLen, sname.upper(), firstAndLastChildIdsData ))
+		setup.append('	add_group((char[]*) &%s, %s, (char[]*) &%s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'FIRST_AND_LAST_CHILD_IDS_' + sname.upper(), firstAndLastChildIdsDataLen ))
+		for ob in ob.children:
+			ExportObject (ob)
+	elif ob.type == "MESH":
+		meshes.append(ob)
+		setup.append('	objects[%s].position = {%s,%s};' %( idx, x, z ))
+		setup.append('	objects[%s].scale = {%s,%s};' %( idx, sx, sz ))
+		#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' %( idx, random() ))
+		if len(ob.material_slots) > 0:
+			materialColor = ob.material_slots[0].material.diffuse_color
+		else:
+			materialColor = DEFAULT_COLOR
+		setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
+		draw.append('	self = objects[%s]; //MESH: %s' %( idx, ob.name ))
+		if scripts:
+			props = {}
+			for prop in ob.keys():
+				if prop.startswith(( '_', 'c3_' )):
+					continue
+				#head.append('float %s_%s = %s;' %( sname, prop, ob[prop] ))
+				head.append('float %s_%s = %s;' %( prop, sname, ob[prop] ))
+				props[prop] = ob[prop]
+			# user C3 scripts
+			for s in scripts:
+				for prop in props:
+					if 'self.' + prop in s:
+						#s = s.replace('self.'+prop, '%s_%s'%( sname, prop ))
+						s = s.replace('self.' + prop, '%s_%s' %( prop, sname ))
+				draw.append('\t' + s)
+			# save object state: from stack back to heap
+			draw.append('	objects[%s] = self; //MESH: %s' %( idx, ob.name ))
+		if ob.display_type in ( 'TEXTURED', 'SOLID' ):
+			if IsCircle(ob):
+				rad = ob.data.vertices[0].co.y
+				if not rad:
+					for v in ob.data.vertices:
+						print(v.co)
+					print('WARN: not a circle? %s' %ob.name)
+					rad = 1.0
+				if wasm:
+					#draw.append('	draw_circle_wasm((int)self.position.x,(int) self.position.y, self.scale.x, self.color);')
+					draw.append('	draw_circle_wasm((int) self.position.x,(int) self.position.y, self.scale.x * %s, self.color);' %rad)
+				else:
+					#draw.append('	raylib::draw_circle_v(self.position, self.scale.x, self.color);')
+					draw.append('	raylib::draw_circle_v(self.position, self.scale.x * %s, self.color);' %rad)
+			else:
+				draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
+	elif ob.type == 'GREASEPENCIL':
+		meshes.append(ob)
+		if HasScript(ob, False):
+			setup.append('	objects[%s].position = { %s, %s };' %( idx, x, z ))
+			sx, sy, sz = ob.scale
+			setup.append('	objects[%s].scale = { %s, %s };' %( idx, sx, sz ))
+		if wasm:
+			GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, idx)
+		else:
+			GreaseToC3Raylib (ob, datas, head, draw, setup)
+	elif ob.type == 'CURVE':
+		curves.append(ob)
+		if len(ob.material_slots) > 0:
+			materialColor = ob.material_slots[0].material.diffuse_color
+		else:
+			materialColor = DEFAULT_COLOR
+		setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
+		# if ob.c3_hide:
+		# 	setup.append('	objects[%s].hide = true;' %idx)
+		# if ob.rotation_mode == 'QUATERNION':
+		# 	rot = ob.rotation_quaternion
+		# else:
+		# 	rot = ob.rotation_euler
+		# min = Vector((float('inf'), float('inf')))
+		# max = Vector((-float('inf'), -float('inf')))
+		# meshOb = CurveToMesh(ob)
+		# for vertex in meshOb.data.vertices:
+		# 	vertex = vertex.co.copy()
+		# 	vertex *= ob.scale * SCALE
+		# 	vertex = ToVector2(vertex)
+		# 	vertex += off - ToVector2(ob.location * SCALE)
+		# 	min = GetMinComponents(vertex, min, True)
+		# 	max = GetMaxComponents(vertex, max, True)
+		# bpy.data.objects.remove(meshOb, do_unlink = True)
+		# min *= ToVector2(ob.scale * SCALE)
+		# max *= ToVector2(ob.scale * SCALE)
+		# size = max - min
+		# center = (min + max) / 2
+		# setup.append('	objects[%s].position = { %s, %s };' %( idx, min.x, max.y ))
+		svgText_ = svgText
+		indexOfName = svgText_.find(ob.name)
+		indexOfGroupStart = svgText_.rfind('\n', 0, indexOfName)
+		groupEndIndicator = '</g>'
+		indexOfGroupEnd = svgText_.find(groupEndIndicator, indexOfGroupStart) + len(groupEndIndicator)
+		group = svgText_[indexOfGroupStart : indexOfGroupEnd]
+		parentGroupIndicator = '\n  <g'
+		indexOfParentGroupStart = svgText_.find(parentGroupIndicator)
+		indexOfParentGroupContents = svgText_.find('\n', indexOfParentGroupStart + len(parentGroupIndicator))
+		indexOfParentGroupEnd = svgText_.rfind('</g')
+		setup.append('	objects[%s].scale = { %s, %s };' %( idx, round(ob.scale.x), round(ob.scale.y) ))
+		svgText_ = svgText_[: indexOfParentGroupContents] + group + svgText_[indexOfParentGroupEnd :]
+		# transformIndicator = 'transform="'
+		# indexForTranslate = svgText_.find('"', svgText_.find(transformIndicator) + len(transformIndicator))
+		# svgText_ = svgText_[: indexForTranslate] + ' translate(' + str(center.x) + ', ' + str(center.y) + ')' + svgText_[indexForTranslate :]
+		viewBoxIndicator = 'viewBox="'
+		indexOfViewBoxStart = svgText_.find(viewBoxIndicator) + len(viewBoxIndicator)
+		indexOfViewBoxEnd = svgText_.find('"', indexOfViewBoxStart)
+		viewBox = svgText_[indexOfViewBoxStart : indexOfViewBoxEnd]
+		viewBoxData = '{'
+		for value in viewBox.split(' '):
+			viewBoxData += str(round(float(value)) + 128) + ','
+		viewBoxData += '}'
+		head.append('const char[4] VIEW_BOX_%s = %s;' %( sname.upper(), viewBoxData ))
+		pathDataIndicator = ' d="'
+		indexOfPathDataStart = svgText_.find(pathDataIndicator) + len(pathDataIndicator)
+		indexOfPathDataEnd = svgText_.find('"', indexOfPathDataStart)
+		pathData = svgText_[indexOfPathDataStart : indexOfPathDataEnd]
+		pathData = pathData.replace('.0', '')
+		pathData_ = []
+		pathDataLen = 0
+		vectors = pathData.split(' ')
+		for vector in vectors:
+			if len(vector) == 1:
+				continue
+			components = vector.split(',')
+			x = int(components[0])
+			y = int(components[1])
+			pathData_.append(x + 128)
+			pathData_.append(y + 128)
+			pathDataLen += 2
+		pathData_ = '{' + str(pathData_)[1 : -1] + '}'
+		head.append('const char[%s] PATH_DATA_%s = %s;' %( pathDataLen, sname.upper(), pathData_ ))
+		idData, idDataLen = ToC3(ob.name)
+		head.append('const char[%s] ID_%s = %s;' %( idDataLen, sname.upper(), idData ))
+		cyclic = ob.data.splines[0].use_cyclic_u
+		isCyclicStr = str(cyclic).lower()
+		setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[4]*) &%s, (char[]*) &%s, %s, %s, %s);'
+			%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'VIEW_BOX_' + sname.upper(), 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr ))
+		# draw.append('	set_svg_path((char[]*) &%s, %s, (char[]*) &%s, %s);' %( ID_ + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen ))
+		draw.append('	randomize_svg((char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, isCyclicStr, 0.3 ))
+	elif ob.type == 'FONT' and wasm:
+		cscale = ob.data.size * SCALE
+		if use_html:
+			css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %( x + (cscale * 0.1), z - cscale, cscale )
+			div = '<div id="%s" style="%s">%s</div>' %( sname, css, ob.data.body )
+			html.append(div)
+			return
+		meshes.append(ob)
+		hide = 'false'
+		if ob.c3_hide:
+			setup.append('	objects[%s].hide = true;' %idx)
+			hide = 'true'
+		if ob.parent:
+			x, y, z = ob.location * SCALE
+			z = -z
+		dom_name = ob.name
+		if dom_name.startswith('_'):
+			dom_name = ''
+		if ob.parent and HasScript(ob.parent, False):
+			setup += [
+				'	objects[%s].position = {%s, %s};' %( idx, x + (cscale * 0.1), z - (cscale * 1.8) ),
+				'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name ),
+			]
+		elif ob.parent:
+			fx = x + (cscale * 0.1)
+			fy = z - (cscale * 1.8)
+			fx += (ob.parent.location.x * SCALE) + offX
+			fy += (ob.parent.location.z * SCALE) + offY
+			setup += [
+				'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
+			]
+		else:
+			fx = x + (cscale * 0.1)
+			fy = z - (cscale * 1.8)
+			setup += [
+				'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
+			]
+		if ob.scale.y != 1.0:
+			setup += [
+				'	objects[%s].css_scale_y(%s);' %(idx, ob.scale.y),
+			]
+		if ob.location.y >= 0.1:
+			setup.append('	html_css_zindex(objects[%s].id, -%s);' %( idx, int(ob.location.y * 10) ))
+		elif ob.location.y <= -0.1:
+			setup.append('	html_css_zindex(objects[%s].id, %s);' %( idx, abs(int(ob.location.y * 10)) ))
+		# slightly bigger than using html_css_zindex
+		#if ob.location.y >= 0.1:
+		#	setup.append('	html_css_int(objects[%s].id,"zIndex",-%s);' %( idx, int(ob.location.y * 10) ))
+		#elif ob.location.y <= -0.1:
+		#	setup.append('	html_css_int(objects[%s].id,"zIndex", %s);' %( idx, abs(int(ob.location.y * 10)) ))
+		if scripts or (ob.parent and HasScript(ob.parent, False)):
+			draw.append('	self = objects[%s]; // %s' %( idx, ob.name ))
+		if scripts:
+			props = {}
+			for prop in ob.keys():
+				if prop.startswith( ('_', 'c3_') ):
+					continue
+				#head.append('float %s_%s = %s;' %( sname, prop, ob[prop] )) 
+				# Error: A letter must precede any digit `__001` (object copy in blender renames with .00N)
+				if ob[prop] == 0:
+					head.append('float %s_%s;' %( prop, sname )) 
+				else:
+					head.append('float %s_%s = %s;' %( prop, sname, ob[prop] ))
+				props[prop] = ob[prop]
+			# user C3 scripts
+			for s in scripts:
+				for prop in props:
+					if 'self.' + prop in s:
+						#s = s.replace('self.'+prop, '%s_%s' %(sname,prop))
+						s = s.replace('self.' + prop, '%s_%s' %( prop, sname ))
+				draw.append('\t' + s)
+		if ob.parent != None and HasScript(ob.parent, False):
+			if prevParentName != ob.parent.name:
+				prevParentName = ob.parent.name
+				#draw.append('parent = objects[%s_id];' % GetSafeName(ob.parent))
+				draw.append('parent = objects[%s_ID];' %GetSafeName(ob.parent).upper())
+			draw += [
+				#'parent = objects[%s_id];' % GetSafeName(ob.parent),
+				#'self.position.x=parent.position.x;',
+				#'self.position.y=parent.position.y;',
+				'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
+			]
+	exportedObs.append(ob)
 
 def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {}):
-	global WASM_EXTERN
-	global JS_LIB_API_ENV
+	global head
+	global draw
+	global meshes
+	global curves
+	global svgText
+	global exportedObs
+	global userWasmExtern
+	global userJsLibAPIEnv
+	userWasmExtern = ''
+	userJsLibAPIEnv = ''
 	resX = world.c3_export_res_x
 	resY = world.c3_export_res_y
 	SCALE = world.c3_export_scale
@@ -445,18 +730,10 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	offY = world.c3_export_offset_y
 	off = Vector(( offX, offY ))
 	unpackers = {}
-	head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
-	setup = [ 'fn void main() @extern("main") @wasm {' ]
 	global_funcs = {}
 	main_init = {}
 	drawHeader = [
 		'fn void game_frame() @extern("$") @wasm {',
-	]
-	draw  = [
-		#'fn void game_frame() @extern("$") @wasm {',
-		#'	Object self;',
-		#'	Object parent;',
-		#'	float delta_time = raylib::get_frame_time();',
 	]
 	if wasm:
 		draw.append('	html_canvas_clear();')
@@ -470,10 +747,10 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 				script = scriptInfo[0]
 				isJs = scriptInfo[1]
 				if isJs:
-					JS_LIB_API_ENV += script
+					userJsLibAPIEnv += script
 					continue
 				elif '(' not in script:
-					WASM_EXTERN += script
+					userWasmExtern += script
 				else:
 					lns = script.split('\n')
 					skip = False
@@ -484,7 +761,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 						if not skip:
 							indexOfArgsStart = ln.find('(')
 							if indexOfArgsStart == -1:
-								WASM_EXTERN += ln + '\n'
+								userWasmExtern += ln + '\n'
 								currentMethod += ln + '\n'
 								continue
 							indexOfArgsEnd = ln.find(')')
@@ -513,7 +790,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 								currentMethod = ln.replace(args[1 :], argsNames) + '\n'
 							wasmExternTxt = 'extern fn void ' + newMethodName + ' ' + args
 							wasmExternTxt += ') @extern("' + methodName + '");'
-							WASM_EXTERN += wasmExternTxt + '\n'
+							userWasmExtern += wasmExternTxt + '\n'
 						else:
 							currentMethod += ln + '\n'
 							if '}' in ln:
@@ -542,6 +819,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			head.append(s)
 		else:
 			head.append(WASM_EXTERN)
+		head.append(userWasmExtern)
 		head.append(WASM_HELPERS)
 	global_v2arrays = {}
 	meshes = []
@@ -556,237 +834,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	bpy.ops.curve.export_svg()
 	svgText = open('/tmp/Output.svg', 'r').read()
 	for ob in bpy.data.objects:
-		if ob.hide_get():
-			continue
-		sname = GetSafeName(ob)
-		x, y, z = ob.location * SCALE
-		y = -y
-		z = -z
-		x += offX
-		y += offY
-		z += offY
-		sx, sy, sz = ob.scale * SCALE
-		idx = len(meshes + curves)
-		if ob.type in ( 'MESH', 'GREASEPENCIL', 'CURVE', 'FONT' ):
-			if not ob.name.startswith('_'):
-				#head.append('short %s_id=%s;' %(sname,idx))
-				head.append('const short %s_ID = %s;' %(sname.upper(), idx))
-		scripts = []
-		if ob.type == "MESH":
-			meshes.append(ob)
-			setup.append('	objects[%s].position = {%s,%s};' %(idx, x, z))
-			setup.append('	objects[%s].scale = {%s,%s};' %(idx, sx, sz))
-			#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' %(idx, random()))
-			if len(ob.material_slots) > 0:
-				materialColor = ob.material_slots[0].material.diffuse_color
-			else:
-				materialColor = DEFAULT_COLOR
-			setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
-			draw.append('	self = objects[%s]; //MESH: %s' %(idx, ob.name) )
-			if scripts:
-				props = {}
-				for prop in ob.keys():
-					if prop.startswith(( '_', 'c3_' )): continue
-					#head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
-					head.append('float %s_%s = %s;' %(prop, sname, ob[prop]))
-					props[prop] = ob[prop]
-				# user C3 scripts
-				for s in scripts:
-					for prop in props:
-						if 'self.' + prop in s:
-							#s = s.replace('self.'+prop, '%s_%s'%(sname,prop))
-							s = s.replace('self.' + prop, '%s_%s' %( prop, sname ))
-					draw.append('\t' + s)
-				# save object state: from stack back to heap
-				draw.append('	objects[%s] = self; //MESH: %s' %( idx, ob.name ))
-			if ob.display_type in ( 'TEXTURED', 'SOLID' ):
-				if IsCircle(ob):
-					rad = ob.data.vertices[0].co.y
-					if not rad:
-						for v in ob.data.vertices:
-							print(v.co)
-						print('WARN: not a circle? %s' %ob.name)
-						rad = 1.0
-					if wasm:
-						#draw.append('	draw_circle_wasm((int)self.position.x,(int) self.position.y, self.scale.x, self.color);')
-						draw.append('	draw_circle_wasm((int) self.position.x,(int) self.position.y, self.scale.x * %s, self.color);' %rad)
-					else:
-						#draw.append('	raylib::draw_circle_v(self.position, self.scale.x, self.color);')
-						draw.append('	raylib::draw_circle_v(self.position, self.scale.x * %s, self.color);' %rad)
-				else:
-					draw.append('	raylib::draw_rectangle_v(self.position, self.scale, self.color);')
-		elif ob.type == 'GREASEPENCIL':
-			meshes.append(ob)
-			if HasScript(ob, False):
-				setup.append('	objects[%s].position = { %s, %s };' %( idx, x, z ))
-				sx, sy, sz = ob.scale
-				setup.append('	objects[%s].scale = { %s, %s };' %( idx, sx, sz ))
-			if wasm:
-				GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, idx)
-			else:
-				GreaseToC3Raylib (ob, datas, head, draw, setup)
-		elif ob.type == 'CURVE':
-			curves.append(ob)
-			if len(ob.material_slots) > 0:
-				materialColor = ob.material_slots[0].material.diffuse_color
-			else:
-				materialColor = DEFAULT_COLOR
-			setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
-			# if ob.c3_hide:
-			# 	setup.append('	objects[%s].hide = true;' %idx)
-			# if ob.rotation_mode == 'QUATERNION':
-			# 	rot = ob.rotation_quaternion
-			# else:
-			# 	rot = ob.rotation_euler
-			# min = Vector((float('inf'), float('inf')))
-			# max = Vector((-float('inf'), -float('inf')))
-			# meshOb = CurveToMesh(ob)
-			# for vertex in meshOb.data.vertices:
-			# 	vertex = vertex.co.copy()
-			# 	vertex *= ob.scale * SCALE
-			# 	vertex = ToVector2(vertex)
-			# 	vertex += off - ToVector2(ob.location * SCALE)
-			# 	min = GetMinComponents(vertex, min, True)
-			# 	max = GetMaxComponents(vertex, max, True)
-			# bpy.data.objects.remove(meshOb, do_unlink = True)
-			# min *= ToVector2(ob.scale * SCALE)
-			# max *= ToVector2(ob.scale * SCALE)
-			# size = max - min
-			# center = (min + max) / 2
-			# setup.append('	objects[%s].position = { %s, %s };' %( idx, min.x, max.y ))
-			svgText_ = svgText
-			indexOfName = svgText_.find(ob.name)
-			indexOfGroupStart = svgText_.rfind('\n', 0, indexOfName)
-			groupEndIndicator = '</g>'
-			indexOfGroupEnd = svgText_.find(groupEndIndicator, indexOfGroupStart) + len(groupEndIndicator)
-			group = svgText_[indexOfGroupStart : indexOfGroupEnd]
-			parentGroupIndicator = '\n  <g'
-			indexOfParentGroupStart = svgText_.find(parentGroupIndicator)
-			indexOfParentGroupContents = svgText_.find('\n', indexOfParentGroupStart + len(parentGroupIndicator))
-			indexOfParentGroupEnd = svgText_.rfind('</g')
-			setup.append('	objects[%s].scale = { %s, %s };' %( idx, round(ob.scale.x), round(ob.scale.y) ))
-			svgText_ = svgText_[: indexOfParentGroupContents] + group + svgText_[indexOfParentGroupEnd :]
-			# transformIndicator = 'transform="'
-			# indexForTranslate = svgText_.find('"', svgText_.find(transformIndicator) + len(transformIndicator))
-			# svgText_ = svgText_[: indexForTranslate] + ' translate(' + str(center.x) + ', ' + str(center.y) + ')' + svgText_[indexForTranslate :]
-			viewBoxIndicator = 'viewBox="'
-			indexOfViewBoxStart = svgText_.find(viewBoxIndicator) + len(viewBoxIndicator)
-			indexOfViewBoxEnd = svgText_.find('"', indexOfViewBoxStart)
-			viewBox = svgText_[indexOfViewBoxStart : indexOfViewBoxEnd]
-			viewBoxData = '{'
-			for value in viewBox.split(' '):
-				viewBoxData += str(round(float(value)) + 128) + ','
-			viewBoxData += '}'
-			head.append('const char[4] VIEW_BOX_%s = %s;' %( sname.upper(), viewBoxData ))
-			pathDataIndicator = ' d="'
-			indexOfPathDataStart = svgText_.find(pathDataIndicator) + len(pathDataIndicator)
-			indexOfPathDataEnd = svgText_.find('"', indexOfPathDataStart)
-			pathData = svgText_[indexOfPathDataStart : indexOfPathDataEnd]
-			pathData = pathData.replace('.0', '')
-			pathData_ = []
-			pathDataLen = 0
-			vectors = pathData.split(' ')
-			for vector in vectors:
-				if len(vector) == 1:
-					continue
-				components = vector.split(',')
-				x = int(components[0])
-				y = int(components[1])
-				pathData_.append(x + 128)
-				pathData_.append(y + 128)
-				pathDataLen += 2
-			pathData_ = '{' + str(pathData_)[1 : -1] + '}'
-			head.append('const char[%s] PATH_DATA_%s = %s;' %( pathDataLen, sname.upper(), pathData_ ))
-			idData, idDataLen = ToC3(ob.name)
-			head.append('const char[%s] ID_%s = %s;' %( idDataLen, sname.upper(), idData ))
-			cyclic = ob.data.splines[0].use_cyclic_u
-			isCyclicStr = str(cyclic).lower()
-			setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[4]*) &%s, (char[]*) &%s, %s, %s, %s);'
-				%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'VIEW_BOX_' + sname.upper(), 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr ))
-			# draw.append('	set_svg_path((char[]*) &%s, %s, (char[]*) &%s, %s);' %( ID_ + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen ))
-			draw.append('	randomize_svg((char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, isCyclicStr, 0.3 ))
-		elif ob.type == 'FONT' and wasm:
-			cscale = ob.data.size * SCALE
-			if use_html:
-				css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %( x + (cscale * 0.1), z - cscale, cscale )
-				div = '<div id="%s" style="%s">%s</div>' %( sname, css, ob.data.body )
-				html.append(div)
-				continue
-			meshes.append(ob)
-			hide = 'false'
-			if ob.c3_hide:
-				setup.append('	objects[%s].hide = true;' %idx)
-				hide = 'true'
-			if ob.parent:
-				x, y, z = ob.location * SCALE
-				z = -z
-			dom_name = ob.name
-			if dom_name.startswith('_'):
-				dom_name = ''
-			if ob.parent and HasScript(ob.parent, False):
-				setup += [
-					'	objects[%s].position = {%s, %s};' %( idx, x + (cscale * 0.1), z - (cscale * 1.8) ),
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name ),
-				]
-			elif ob.parent:
-				fx = x + (cscale * 0.1)
-				fy = z - (cscale * 1.8)
-				fx += (ob.parent.location.x * SCALE) + offX
-				fy += (ob.parent.location.z * SCALE) + offY
-				setup += [
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
-				]
-			else:
-				fx = x + (cscale * 0.1)
-				fy = z - (cscale * 1.8)
-				setup += [
-					'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, fx,fy, cscale, hide, dom_name ),
-				]
-			if ob.scale.y != 1.0:
-				setup += [
-					'	objects[%s].css_scale_y(%s);' %(idx, ob.scale.y),
-				]
-			if ob.location.y >= 0.1:
-				setup.append('	html_css_zindex(objects[%s].id, -%s);' %( idx, int(ob.location.y * 10) ))
-			elif ob.location.y <= -0.1:
-				setup.append('	html_css_zindex(objects[%s].id, %s);' %( idx, abs(int(ob.location.y * 10)) ))
-			# slightly bigger than using html_css_zindex
-			#if ob.location.y >= 0.1:
-			#	setup.append('	html_css_int(objects[%s].id,"zIndex",-%s);' %( idx, int(ob.location.y * 10) ))
-			#elif ob.location.y <= -0.1:
-			#	setup.append('	html_css_int(objects[%s].id,"zIndex", %s);' %( idx, abs(int(ob.location.y * 10)) ))
-			if scripts or (ob.parent and HasScript(ob.parent, False)):
-				draw.append('	self = objects[%s]; // %s' %( idx, ob.name ))
-			if scripts:
-				props = {}
-				for prop in ob.keys():
-					if prop.startswith( ('_', 'c3_') ):
-						continue
-					#head.append('float %s_%s = %s;' %( sname, prop, ob[prop] )) 
-					# Error: A letter must precede any digit `__001` (object copy in blender renames with .00N)
-					if ob[prop] == 0:
-						head.append('float %s_%s;' %( prop, sname )) 
-					else:
-						head.append('float %s_%s = %s;' %( prop, sname, ob[prop] ))
-					props[prop] = ob[prop]
-				# user C3 scripts
-				for s in scripts:
-					for prop in props:
-						if 'self.' + prop in s:
-							#s = s.replace('self.'+prop, '%s_%s' %(sname,prop))
-							s = s.replace('self.' + prop, '%s_%s' %( prop, sname ))
-					draw.append('\t' + s)
-			if ob.parent != None and HasScript(ob.parent, False):
-				if prevParentName != ob.parent.name:
-					prevParentName = ob.parent.name
-					#draw.append('parent = objects[%s_id];' % GetSafeName(ob.parent))
-					draw.append('parent = objects[%s_ID];' %GetSafeName(ob.parent).upper())
-				draw += [
-					#'parent = objects[%s_id];' % GetSafeName(ob.parent),
-					#'self.position.x=parent.position.x;',
-					#'self.position.y=parent.position.y;',
-					'html_set_position(self.id, self.position.x + parent.position.x, self.position.y + parent.position.y);',
-				]
+		ExportObject (ob)
 	if global_v2arrays:
 		for gname in global_v2arrays:
 			head.append(global_v2arrays[gname])
@@ -1571,7 +1619,7 @@ raylib_like_api = {
 		const viewBox_ = new Uint8Array(buf, viewBox, 4);
 		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
 		var path = 'M' + (pathData_[0] - 128) + ',' + (pathData_[1] - 128) + ' ';
-		for (var i = 2; i < pathData_.length; i += 2)
+		for (var i = 2; i < pathDataLen; i += 2)
 		{
 			if (i - 2 % 6 == 0)
 				path += 'C';
@@ -1579,9 +1627,9 @@ raylib_like_api = {
 		}
 		if (cyclic)
 			path += 'Z';
-		var prefix = `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="` + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + '" style="position:absolute;z-index:' + zIndex + `">
+		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + '" viewBox="' + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + '" style="position:absolute;z-index:' + zIndex + `">
   <g transform="scale(1 -1)">
-    <g id="` + id_ + `" transform="scale(` + size_[0] + ' ' + size_[1] + `)">
+    <g transform="scale(` + size_[0] + ' ' + size_[1] + `)">
       <path id="Material" style="fill:rgb(` + color_[0] + ' ' + color_[1] + ' ' + color_[2] + `)" d="`;
 		var suffix = `"/>
     </g>
@@ -1607,7 +1655,7 @@ raylib_like_api = {
 		const initPathData_ = new Uint8Array(buf, initPathData, initPathDataLen);
 		var offset = random_vector_2d(maxDist);
 		var path = 'M' + (initPathData_[0] - 128 + offset[0]) + ',' + (initPathData_[1] - 128 + offset[1]) + ' ';
-		for (var i = 2; i < initPathData_.length; i += 2)
+		for (var i = 2; i < initPathDataLen; i += 2)
 		{
 			var offset = random_vector_2d(maxDist);
 			if (i - 2 % 6 == 0)
@@ -1616,7 +1664,7 @@ raylib_like_api = {
 		}
 		if (cyclic)
 			path += 'Z';
-		document.getElementById(id_).children[0].setAttribute("d", path);
+		document.getElementById(id_).children[0].children[0].children[0].setAttribute("d", path);
 	}
 	''',
 	'ClearBackground' : '''
@@ -1662,6 +1710,34 @@ raylib_like_api = {
 		result[3] = 255;
 	}
 	''',
+	'AddGroup' : '''
+	AddGroup (id, idLen, firstAndLastChildIds, firstAndLastChildIdsLen)
+	{
+		const buf = this.wasm.instance.exports.memory.buffer;
+		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
+		const firstAndLastChildIds_ = new TextDecoder().decode(new Uint8Array(buf, firstAndLastChildIds, firstAndLastChildIdsLen));
+		var firstChild = '';
+		var lastChild = '';
+		var foundFirstChild = '';
+		for (var i = 0; i < firstAndLastChildIdsLen; i ++)
+		{
+			var char = firstAndLastChildIds_[i];
+			if (char == ',')
+				foundFirstChild = true;
+			else if (foundFirstChild)
+				firstChild += char;
+			else
+				lastChild += char;
+		}
+		var html = document.documentElement.innerHTML;
+		var indexOfFirstChild = html.indexOf(firstChild);
+		indexOfLastChild = html.indexOf('</svg>', indexOfFirstChild) + 6;
+		var indexOfLastChild = html.indexOf(lastChild);
+		indexOfLastChild = html.lastIndexOf('<', indexOfLastChild);
+		document.documentElement.innerHTML = html.slice(0, indexOfFirstChild) + '</g>' + html.slice(indexOfFirstChild);
+		document.documentElement.innerHTML = html.slice(0, indexOfLastChild) + '<g id="' + id_ + '">' + html.slice(indexOfLastChild);
+	}
+	''',
 }
 
 raylib_like_api_mini = {}
@@ -1690,6 +1766,7 @@ def GenMiniAPI ():
 GenMiniAPI ()
 
 def GenJsAPI (world, c3, user_methods):
+	global userJsLibAPIEnv
 	skip = []
 	if 'raylib::color_from_hsv' not in c3:
 		skip.append('ColorFromHSV')
@@ -1710,12 +1787,14 @@ def GenJsAPI (world, c3, user_methods):
 		skip.append('GetScreenHeight')
 	if 'draw_svg' not in c3:
 		skip.append('DrawSvg')
+	if 'set_svg_path' not in c3:
+		skip.append('SetSvgPath')
 	if 'randomize_svg' not in c3:
 		skip.append('RandomizeSvg')
 	if world.c3_js13kb:
 		js = [ JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
-		js = [ JS_LIB_API_ENV, JS_LIB_API ]
+		js = [ userJsLibAPIEnv, JS_LIB_API_ENV, JS_LIB_API ]
 	for fname in raylib_like_api:
 		if fname in skip:
 			print('Skipping:', fname)
@@ -1924,23 +2003,23 @@ def BuildWasm (world):
 
 	return wasm
 
-bpy.types.Material.c3_export_trifan = bpy.props.BoolProperty(name = 'triangle fan')
-bpy.types.Material.c3_export_tristrip = bpy.props.BoolProperty(name = 'triangle strip')
+bpy.types.Material.c3_export_trifan = bpy.props.BoolProperty(name = 'Triangle fan')
+bpy.types.Material.c3_export_tristrip = bpy.props.BoolProperty(name = 'Triangle strip')
 
-bpy.types.World.c3_export_res_x = bpy.props.IntProperty(name = 'resolution X', default = 800)
-bpy.types.World.c3_export_res_y = bpy.props.IntProperty(name = 'resolution Y', default = 600)
-bpy.types.World.c3_export_scale = bpy.props.FloatProperty(name = 'scale', default = 100)
-bpy.types.World.c3_export_offset_x = bpy.props.IntProperty(name = 'offset X', default = 100)
-bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name = 'offset Y', default = 100)
+bpy.types.World.c3_export_res_x = bpy.props.IntProperty(name = 'Resolution X', default = 800)
+bpy.types.World.c3_export_res_y = bpy.props.IntProperty(name = 'Resolution Y', default = 600)
+bpy.types.World.c3_export_scale = bpy.props.FloatProperty(name = 'Scale', default = 100)
+bpy.types.World.c3_export_offset_x = bpy.props.IntProperty(name = 'Offset X', default = 100)
+bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name = 'Offset Y', default = 100)
 
-bpy.types.World.c3_export_html = bpy.props.StringProperty(name = 'c3 export (.html)')
-bpy.types.World.c3_export_zip = bpy.props.StringProperty(name = 'c3 export (.zip)')
-bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name = 'c3 minifiy js/wasm api calls')
+bpy.types.World.c3_export_html = bpy.props.StringProperty(name = 'C3 export (.html)')
+bpy.types.World.c3_export_zip = bpy.props.StringProperty(name = 'C3 export (.zip)')
+bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name = 'C3 minifiy js/wasm api calls')
 bpy.types.World.c3_js13kb = bpy.props.BoolProperty(name = 'js13k: error on export if output is over 13KB')
-bpy.types.World.c3_invalid_html = bpy.props.BoolProperty(name = 'save space with invalid html wrapper')
+bpy.types.World.c3_invalid_html = bpy.props.BoolProperty(name = 'Save space with invalid html wrapper')
 
 bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
-	name = 'optimize',
+	name = 'Optimize',
 	items = [
 		('O0', 'O0', 'Safe, no optimizations, emit debug info.'), 
 		('O1', 'O1', 'Safe, high optimization, emit debug info.'), 
@@ -1953,9 +2032,9 @@ bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
 	]
 )
 
-bpy.types.GreasePencilv3.c3_grease_optimize = bpy.props.IntProperty(name = 'grease pencil optimize', min = 0, max = 8)
+bpy.types.GreasePencilv3.c3_grease_optimize = bpy.props.IntProperty(name = 'Grease pencil optimize', min = 0, max = 8)
 bpy.types.GreasePencilv3.c3_grease_quantize = bpy.props.EnumProperty(
-	name = 'quantize',
+	name = 'Quantize',
 	items = [
 		('32bits', '32bits', '32bit vertices'), 
 		('16bits', '16bits', '16bit vertices'), 
