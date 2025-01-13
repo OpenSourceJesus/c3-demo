@@ -442,25 +442,14 @@ curves = []
 datas = {}
 head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
 setup = [ 'fn void main() @extern("main") @wasm {' ]
-draw  = [
-	#'fn void game_frame() @extern("$") @wasm {',
-	#'	Object self;',
-	#'	Object parent;',
-	#'	float delta_time = raylib::get_frame_time();',
-]
+draw  = []
 svgText = ''
 userWasmExtern = ''
 userJsLibAPIEnv = ''
 
 def ExportObject (ob):
-	global head
 	global draw
 	global setup
-	global datas
-	global meshes
-	global curves
-	global svgText
-	global exportedObs
 	if ob.hide_get() or ob in exportedObs:
 		return
 	world = bpy.data.worlds[0]
@@ -555,28 +544,6 @@ def ExportObject (ob):
 		else:
 			materialColor = DEFAULT_COLOR
 		setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
-		# if ob.c3_hide:
-		# 	setup.append('	objects[%s].hide = true;' %idx)
-		# if ob.rotation_mode == 'QUATERNION':
-		# 	rot = ob.rotation_quaternion
-		# else:
-		# 	rot = ob.rotation_euler
-		# min = Vector((float('inf'), float('inf')))
-		# max = Vector((-float('inf'), -float('inf')))
-		# meshOb = CurveToMesh(ob)
-		# for vertex in meshOb.data.vertices:
-		# 	vertex = vertex.co.copy()
-		# 	vertex *= ob.scale * SCALE
-		# 	vertex = ToVector2(vertex)
-		# 	vertex += off - ToVector2(ob.location * SCALE)
-		# 	min = GetMinComponents(vertex, min, True)
-		# 	max = GetMaxComponents(vertex, max, True)
-		# bpy.data.objects.remove(meshOb, do_unlink = True)
-		# min *= ToVector2(ob.scale * SCALE)
-		# max *= ToVector2(ob.scale * SCALE)
-		# size = max - min
-		# center = (min + max) / 2
-		# setup.append('	objects[%s].position = { %s, %s };' %( idx, min.x, max.y ))
 		svgText_ = svgText
 		indexOfName = svgText_.find(ob.name)
 		indexOfGroupStart = svgText_.rfind('\n', 0, indexOfName)
@@ -589,9 +556,6 @@ def ExportObject (ob):
 		indexOfParentGroupEnd = svgText_.rfind('</g')
 		setup.append('	objects[%s].scale = { %s, %s };' %( idx, round(ob.scale.x), round(ob.scale.y) ))
 		svgText_ = svgText_[: indexOfParentGroupContents] + group + svgText_[indexOfParentGroupEnd :]
-		# transformIndicator = 'transform="'
-		# indexForTranslate = svgText_.find('"', svgText_.find(transformIndicator) + len(transformIndicator))
-		# svgText_ = svgText_[: indexForTranslate] + ' translate(' + str(center.x) + ', ' + str(center.y) + ')' + svgText_[indexForTranslate :]
 		viewBoxIndicator = 'viewBox="'
 		indexOfViewBoxStart = svgText_.find(viewBoxIndicator) + len(viewBoxIndicator)
 		indexOfViewBoxEnd = svgText_.find('"', indexOfViewBoxStart)
@@ -626,7 +590,6 @@ def ExportObject (ob):
 		isCyclicStr = str(cyclic).lower()
 		setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[4]*) &%s, (char[]*) &%s, %s, %s, %s);'
 			%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'VIEW_BOX_' + sname.upper(), 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr ))
-		# draw.append('	set_svg_path((char[]*) &%s, %s, (char[]*) &%s, %s);' %( ID_ + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen ))
 		draw.append('	randomize_svg((char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, isCyclicStr, 0.3 ))
 	elif ob.type == 'FONT' and wasm:
 		cscale = ob.data.size * SCALE
@@ -715,6 +678,7 @@ def ExportObject (ob):
 def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {}):
 	global head
 	global draw
+	global setup
 	global meshes
 	global curves
 	global svgText
@@ -825,7 +789,6 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	meshes = []
 	curves = []
 	datas = {}
-	ascii_letters = list(string.ascii_uppercase)
 	prevParentName = None
 	bpy.ops.object.select_all(action = 'DESELECT')
 	for ob in bpy.data.objects:
@@ -1387,6 +1350,191 @@ function make_environment(e){
 		}
 	});
 }
+(function (root, ns, factory) {
+    "use strict";
+
+    if (typeof (module) !== 'undefined' && module.exports) { // CommonJS
+        module.exports = factory(ns, root);
+    } else if (typeof (define) === 'function' && define.amd) { // AMD
+        define("detect-zoom", function () {
+            return factory(ns, root);
+        });
+    } else {
+        root[ns] = factory(ns, root);
+    }
+
+}(window, 'detectZoom', function () {
+    var devicePixelRatio = function () {
+        return window.devicePixelRatio || 1;
+    };
+    var fallback = function () {
+        return {
+            zoom: 1,
+            devicePxPerCssPx: 1
+        };
+    };
+    var ie8 = function () {
+        var zoom = Math.round((screen.deviceXDPI / screen.logicalXDPI) * 100) / 100;
+        return {
+            zoom: zoom,
+            devicePxPerCssPx: zoom * devicePixelRatio()
+        };
+    };
+    var ie10 = function () {
+        var zoom = Math.round((document.documentElement.offsetHeight / window.innerHeight) * 100) / 100;
+        return {
+            zoom: zoom,
+            devicePxPerCssPx: zoom * devicePixelRatio()
+        };
+    };
+    var chrome = function()
+    {
+        var zoom = Math.round(((window.outerWidth) / window.innerWidth)*100) / 100;
+        return {
+            zoom: zoom,
+            devicePxPerCssPx: zoom * devicePixelRatio()
+        };	    
+    }
+    var safari= function()
+    {
+        var zoom = Math.round(((document.documentElement.clientWidth) / window.innerWidth)*100) / 100;
+        return {
+            zoom: zoom,
+            devicePxPerCssPx: zoom * devicePixelRatio()
+        };	    
+    }
+    var webkitMobile = function () {
+        var deviceWidth = (Math.abs(window.orientation) == 90) ? screen.height : screen.width;
+        var zoom = deviceWidth / window.innerWidth;
+        return {
+            zoom: zoom,
+            devicePxPerCssPx: zoom * devicePixelRatio()
+        };
+    };
+    var webkit = function () {
+        var important = function (str) {
+            return str.replace(/;/g, " !important;");
+        };
+        var div = document.createElement('div');
+        div.innerHTML = "1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>0";
+        div.setAttribute('style', important('font: 100px/1em sans-serif; -webkit-text-size-adjust: none; text-size-adjust: none; height: auto; width: 1em; padding: 0; overflow: visible;'));
+        var container = document.createElement('div');
+        container.setAttribute('style', important('width:0; height:0; overflow:hidden; visibility:hidden; position: absolute;'));
+        container.appendChild(div);
+        document.body.appendChild(container);
+        var zoom = 1000 / div.clientHeight;
+        zoom = Math.round(zoom * 100) / 100;
+        document.body.removeChild(container);
+        return{
+            zoom: zoom,
+            devicePxPerCssPx: zoom * devicePixelRatio()
+        };
+    };
+    var firefox4 = function () {
+        var zoom = mediaQueryBinarySearch('min--moz-device-pixel-ratio', '', 0, 10, 20, 0.0001);
+        zoom = Math.round(zoom * 100) / 100;
+        return {
+            zoom: zoom,
+            devicePxPerCssPx: zoom
+        };
+    };
+    var firefox18 = function () {
+        return {
+            zoom: firefox4().zoom,
+            devicePxPerCssPx: devicePixelRatio()
+        };
+    };
+    var opera11 = function () {
+        var zoom = window.top.outerWidth / window.top.innerWidth;
+        zoom = Math.round(zoom * 100) / 100;
+        return {
+            zoom: zoom,
+            devicePxPerCssPx: zoom * devicePixelRatio()
+        };
+    };
+    var mediaQueryBinarySearch = function (property, unit, a, b, maxIter, epsilon) {
+        var matchMedia;
+        var head, style, div;
+        if (window.matchMedia) {
+            matchMedia = window.matchMedia;
+        } else {
+            head = document.getElementsByTagName('head')[0];
+            style = document.createElement('style');
+            head.appendChild(style);
+
+            div = document.createElement('div');
+            div.className = 'mediaQueryBinarySearch';
+            div.style.display = 'none';
+            document.body.appendChild(div);
+
+            matchMedia = function (query) {
+                style.sheet.insertRule('@media ' + query + '{.mediaQueryBinarySearch ' + '{text-decoration: underline} }', 0);
+                var matched = getComputedStyle(div, null).textDecoration == 'underline';
+                style.sheet.deleteRule(0);
+                return {matches: matched};
+            };
+        }
+        var ratio = binarySearch(a, b, maxIter);
+        if (div) {
+            head.removeChild(style);
+            document.body.removeChild(div);
+        }
+        return ratio;
+
+        function binarySearch(a, b, maxIter) {
+            var mid = (a + b) / 2;
+            if (maxIter <= 0 || b - a < epsilon) {
+                return mid;
+            }
+            var query = "(" + property + ":" + mid + unit + ")";
+            if (matchMedia(query).matches) {
+                return binarySearch(mid, b, maxIter - 1);
+            } else {
+                return binarySearch(a, mid, maxIter - 1);
+            }
+        }
+    };
+    var detectFunction = (function () {
+        var func = fallback;
+        if (!isNaN(screen.logicalXDPI) && !isNaN(screen.systemXDPI)) {
+            func = ie8;
+        }
+        else if (window.navigator.msMaxTouchPoints) {
+            func = ie10;
+        }
+        else if(!!window.chrome && !(!!window.opera || navigator.userAgent.indexOf(' Opera') >= 0)){
+            func = chrome;
+        }
+        else if(Object.prototype.toString.call(window.HTMLElement).indexOf('Constructor') > 0){
+            func = safari;
+        }
+        else if ('orientation' in window && 'webkitRequestAnimationFrame' in window) {
+            func = webkitMobile;
+        }
+        else if ('webkitRequestAnimationFrame' in window) {
+            func = webkit;
+        }
+        else if (navigator.userAgent.indexOf('Opera') >= 0) {
+            func = opera11;
+        }
+        else if (window.devicePixelRatio) {
+            func = firefox18;
+        }
+        else if (firefox4().zoom > 0.001) {
+            func = firefox4;
+        }
+        return func;
+    }());
+
+    return ({
+        zoom: function () {
+            return detectFunction().zoom;
+        },
+        device: function () {
+            return detectFunction().devicePxPerCssPx;
+        }
+    });
+}));
 '''
 JS_LIB_API_ENV_MINI = '''
 function make_environment(e){
@@ -1627,13 +1775,11 @@ raylib_like_api = {
 		}
 		if (cyclic)
 			path += 'Z';
-		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + '" viewBox="' + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + '" style="position:absolute;z-index:' + zIndex + `">
-  <g transform="scale(1 -1)">
-    <g transform="scale(` + size_[0] + ' ' + size_[1] + `)">
+		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + '" viewBox="' + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + '" style="overflow:hidden;top:0;right:0;bottom:0;left:0;max-width:100vw;max-height:100vh;position:absolute;z-index:' + zIndex + `">
+    <g transform="scale(` + size_[0] + ' ' + -size_[1] + `)translate(0 0)">
       <path id="Material" style="fill:rgb(` + color_[0] + ' ' + color_[1] + ' ' + color_[2] + `)" d="`;
 		var suffix = `"/>
     </g>
-  </g>
 </svg>`;
 		document.documentElement.innerHTML = document.documentElement.innerHTML.replace('</script>', '</script>' + prefix + path + suffix);
 	}
@@ -1644,7 +1790,7 @@ raylib_like_api = {
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		const pathData_ = new TextDecoder().decode(new Uint8Array(buf, pathData, pathDataLen));
-		document.getElementById(id_).children[0].setAttribute("d", pathData_);
+		document.getElementById(id_).children[0].children[0].setAttribute("d", pathData_);
 	}
 	''',
 	'RandomizeSvg' : '''
@@ -1664,7 +1810,7 @@ raylib_like_api = {
 		}
 		if (cyclic)
 			path += 'Z';
-		document.getElementById(id_).children[0].children[0].children[0].setAttribute("d", path);
+		document.getElementById(id_).children[0].children[0].setAttribute("d", path);
 	}
 	''',
 	'ClearBackground' : '''
@@ -1791,6 +1937,8 @@ def GenJsAPI (world, c3, user_methods):
 		skip.append('SetSvgPath')
 	if 'randomize_svg' not in c3:
 		skip.append('RandomizeSvg')
+	if 'add_group' not in c3:
+		skip.append('AddGroup')
 	if world.c3_js13kb:
 		js = [ JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
@@ -1885,7 +2033,7 @@ def GenHtml (world, wasm, c3, user_html = None, background = '', user_methods = 
 	else:
 		o = [
 			'<html>',
-			'<body %s>' % background,
+			'<body % sstyle="width:600px;height:300px;overflow:hidden;">' % background,
 			'<canvas id="$"></canvas>',
 			'<script>', 
 			'var $0="%s"' % jsb,
