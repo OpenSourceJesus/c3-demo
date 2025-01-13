@@ -128,7 +128,7 @@ if __name__ == '__main__':
 	if bpy:
 		pass
 	elif '--c3demo' in sys.argv:
-		# runs simple test without blender
+		# Runs simple test without blender
 		Build()
 		sys.exit()
 
@@ -155,10 +155,10 @@ MAX_SCRIPTS_PER_OBJECT = 8
 if not bpy:
 	if isLinux:
 		if not os.path.isfile('/usr/bin/blender'):
-			print('did you install blender?')
+			print('Did you install blender?')
 			print('snap install blender')
 	else:
-		print('download blender from: https://blender.org')
+		print('Download blender from: https://blender.org')
 	sys.exit()
 
 HEADER = '''
@@ -468,10 +468,6 @@ def ExportObject (ob):
 	z += offY
 	sx, sy, sz = ob.scale * SCALE
 	idx = len(meshes + curves)
-	if ob.type in ( 'MESH', 'GREASEPENCIL', 'CURVE', 'FONT' ):
-		if not ob.name.startswith('_'):
-			#head.append('short %s_id=%s;' %( sname, idx ))
-			head.append('const short %s_ID = %s;' %(sname.upper(), idx))
 	scripts = []
 	if ob.type == 'EMPTY':
 		idData, idDataLen = ToC3(ob.name)
@@ -481,8 +477,8 @@ def ExportObject (ob):
 		firstAndLastChildIdsData, firstAndLastChildIdsDataLen = ToC3(firstAndLastChildIdsTxt)
 		head.append('const char[%s] FIRST_AND_LAST_CHILD_IDS_%s = %s;' %( firstAndLastChildIdsDataLen, sname.upper(), firstAndLastChildIdsData ))
 		setup.append('	add_group((char[]*) &%s, %s, (char[]*) &%s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'FIRST_AND_LAST_CHILD_IDS_' + sname.upper(), firstAndLastChildIdsDataLen ))
-		for ob in ob.children:
-			ExportObject (ob)
+		for ob_ in ob.children:
+			ExportObject (ob_)
 	elif ob.type == "MESH":
 		meshes.append(ob)
 		setup.append('	objects[%s].position = {%s,%s};' %( idx, x, z ))
@@ -554,7 +550,9 @@ def ExportObject (ob):
 		indexOfParentGroupStart = svgText_.find(parentGroupIndicator)
 		indexOfParentGroupContents = svgText_.find('\n', indexOfParentGroupStart + len(parentGroupIndicator))
 		indexOfParentGroupEnd = svgText_.rfind('</g')
-		setup.append('	objects[%s].scale = { %s, %s };' %( idx, round(ob.scale.x), round(ob.scale.y) ))
+		min, max = GetCurveBoundsMinMax(ob)
+		setup.append('	objects[%s].position = { %s, %s };' %( idx, min.x, min.y ))
+		setup.append('	objects[%s].scale = { %s, %s };' %( idx, (max.x - min.x), (max.y - min.y) ))
 		svgText_ = svgText_[: indexOfParentGroupContents] + group + svgText_[indexOfParentGroupEnd :]
 		viewBoxIndicator = 'viewBox="'
 		indexOfViewBoxStart = svgText_.find(viewBoxIndicator) + len(viewBoxIndicator)
@@ -631,7 +629,7 @@ def ExportObject (ob):
 			]
 		if ob.scale.y != 1.0:
 			setup += [
-				'	objects[%s].css_scale_y(%s);' %(idx, ob.scale.y),
+				'	objects[%s].css_scale_y(%s);' %( idx, ob.scale.y ),
 			]
 		if ob.location.y >= 0.1:
 			setup.append('	html_css_zindex(objects[%s].id, -%s);' %( idx, int(ob.location.y * 10) ))
@@ -699,82 +697,19 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	unpackers = {}
 	global_funcs = {}
 	main_init = {}
-	drawHeader = [
-		'fn void game_frame() @extern("$") @wasm {',
-	]
+	drawHeader = [ 'fn void game_frame() @extern("$") @wasm {' ]
 	head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
 	setup = [ 'fn void main() @extern("main") @wasm {' ]
 	draw = []
 	if wasm:
+		setup.append(MAIN_WASM %( resX, resY ))
 		draw.append('	html_canvas_clear();')
 	else:
+		setup.append(MAIN %( resX, resY ))
 		draw.append('	raylib::begin_drawing();')
 		draw.append('	raylib::clear_background({ 0xFF, 0xFF, 0xFF, 0xFF });')
 	if wasm:
 		head.append(HEADER_OBJECT_WASM)
-		for ob in bpy.data.objects:
-			for scriptInfo in GetScripts(ob, True):
-				script = scriptInfo[0]
-				isJs = scriptInfo[1]
-				if isJs:
-					userJsLibAPIEnv += script
-					continue
-				elif '(' not in script:
-					userWasmExtern += script
-				else:
-					lns = script.split('\n')
-					bracketTier = 0
-					currentMethod = ''
-					for ln in lns:
-						if '{' in ln:
-							bracketTier += 1
-						if bracketTier == 0:
-							indexOfArgsStart = ln.find('(')
-							if indexOfArgsStart == -1:
-								userWasmExtern += ln + '\n'
-								currentMethod += ln + '\n'
-								continue
-							indexOfArgsEnd = ln.find(')')
-							args = ln[indexOfArgsStart : indexOfArgsEnd]
-							argsList = args.split(', ')
-							indexOfMethodNameEnd = ln.rfind(' ', 0, indexOfArgsStart)
-							if indexOfMethodNameEnd == -1:
-								indexOfMethodNameEnd = indexOfArgsStart
-							methodName = ln[: indexOfMethodNameEnd]
-							newMethodName = ''
-							argNum = 0
-							for char in methodName:
-								if argNum > 0 and char.isupper():
-									newMethodName += '_'
-								newMethodName += char.lower()
-								argNum += 1
-							argsNames = ''
-							for arg in argsList:
-								argNameAndValue = arg.split(' ')
-								if len(argNameAndValue) == 2:
-									argsNames += argNameAndValue[1] + ','
-							argsNames = argsNames[: -1]
-							if len(argsNames) == 0:
-								currentMethod = ln + '\n'
-							else:
-								currentMethod = ln.replace(args[1 :], argsNames) + '\n'
-							wasmExternTxt = 'extern fn void ' + newMethodName + ' ' + args
-							wasmExternTxt += ') @extern("' + methodName + '");'
-							userWasmExtern += wasmExternTxt + '\n'
-						else:
-							currentMethod += ln + '\n'
-							if '}' in ln:
-								bracketTier -= 1
-								if bracketTier == 0:
-									raylib_like_api[methodName] = currentMethod
-									currentMethod = ''
-			for scriptInfo in GetScripts(ob, False):
-				script = scriptInfo[0]
-				isInit = scriptInfo[1]
-				if isInit:
-					setup.append(script)
-				else:
-					draw.append(script)
 		if world.c3_miniapi:
 			s = WASM_EXTERN
 			for fname in c3dom_api_mini:
@@ -790,7 +725,6 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 			head.append(s)
 		else:
 			head.append(WASM_EXTERN)
-		head.append(userWasmExtern)
 		head.append(WASM_HELPERS)
 	global_v2arrays = {}
 	meshes = []
@@ -805,13 +739,73 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	svgText = open('/tmp/Output.svg', 'r').read()
 	for ob in bpy.data.objects:
 		ExportObject (ob)
+	for ob in bpy.data.objects:
+		for scriptInfo in GetScripts(ob, True):
+			script = scriptInfo[0]
+			isJs = scriptInfo[1]
+			if isJs:
+				userJsLibAPIEnv += script
+				continue
+			elif '(' not in script:
+				userWasmExtern += script
+			else:
+				lns = script.split('\n')
+				braceTier = 0
+				currentMethod = ''
+				for ln in lns:
+					if '{' in ln:
+						braceTier += 1
+					if braceTier == 0:
+						indexOfArgsStart = ln.find('(')
+						if indexOfArgsStart == -1:
+							userWasmExtern += ln + '\n'
+							currentMethod += ln + '\n'
+							continue
+						indexOfArgsEnd = ln.find(')')
+						args = ln[indexOfArgsStart : indexOfArgsEnd]
+						argsList = args.split(', ')
+						indexOfMethodNameEnd = ln.rfind(' ', 0, indexOfArgsStart)
+						if indexOfMethodNameEnd == -1:
+							indexOfMethodNameEnd = indexOfArgsStart
+						methodName = ln[: indexOfMethodNameEnd]
+						newMethodName = ''
+						argNum = 0
+						for char in methodName:
+							if argNum > 0 and char.isupper():
+								newMethodName += '_'
+							newMethodName += char.lower()
+							argNum += 1
+						argsNames = ''
+						for arg in argsList:
+							argNameAndValue = arg.split(' ')
+							if len(argNameAndValue) == 2:
+								argsNames += argNameAndValue[1] + ','
+						argsNames = argsNames[: -1]
+						if len(argsNames) == 0:
+							currentMethod = ln + '\n'
+						else:
+							currentMethod = ln.replace(args[1 :], argsNames) + '\n'
+						wasmExternTxt = 'extern fn void ' + newMethodName + ' ' + args
+						wasmExternTxt += ') @extern("' + methodName + '");'
+						userWasmExtern += wasmExternTxt + '\n'
+					else:
+						currentMethod += ln + '\n'
+						if '}' in ln:
+							braceTier -= 1
+							if braceTier == 0:
+								raylib_like_api[methodName] = currentMethod
+								currentMethod = ''
+		for scriptInfo in GetScripts(ob, False):
+			script = scriptInfo[0]
+			isInit = scriptInfo[1]
+			if isInit:
+				setup.append(script)
+			else:
+				draw.append(script)
+	head.append(userWasmExtern)
 	if global_v2arrays:
 		for gname in global_v2arrays:
 			head.append(global_v2arrays[gname])
-	if wasm:
-		setup.append(MAIN_WASM %( resX, resY ))
-	else:
-		setup.append(MAIN %( resX, resY ))
 	setup.append('}')
 	if 'self' in '\n'.join(draw):
 		drawHeader.append('	Object self;')
@@ -884,7 +878,7 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 						data.append('Vector2[%s] __%s__%s_%s;' %(n + 1, dname, lidx, sidx ))
 						n += 1
 				else:
-					# default 32bit floats #
+					# Default 32bit floats #
 					s = []
 					if scripts:
 						for pnt in points:
@@ -1357,27 +1351,34 @@ function make_environment(e){
 		}
 	});
 }
-function overlaps (bBox, bBox2)
+function get_pos_and_size (elmt)
 {
-	var maxX = bBox.x + bBox.width;
-	var maxY = bBox.y + bBox.height;
-	var maxX2 = bBox2.x + bBox2.width;
-	var maxY2 = bBox2.y + bBox2.height;
-	return bBox.x > maxX2 && maxX < bBox2.x && bBox.y > maxY2 && maxY < bBox2.y;
+	var posTxt = elmt.getAttribute('pos');
+	var pos = posTxt.split(' ');
+	var posX = parseFloat(pos[0]);
+	var posY = parseFloat(pos[1]);
+	var sizeTxt = elmt.getAttribute('size');
+	var size = sizeTxt.split(' ');
+	var sizeX = parseFloat(size[0]);
+	var sizeY = parseFloat(size[1]);
+	return [ [ posX, posY ], [ sizeX, sizeY ] ];
+}
+function overlaps (pos, size, pos2, size2)
+{
+	return pos[0] > pos2[0] + size2[0] && pos[0] + size[0] < pos2[0] && pos[1] > pos2[1] + size2[1] && pos[1] + size[1] < pos2[1];
 }
 (function (root, ns, factory) {
     "use strict";
 
-    if (typeof (module) !== 'undefined' && module.exports) { // CommonJS
+    if (typeof(module) !== 'undefined' && module.exports) {
         module.exports = factory(ns, root);
-    } else if (typeof (define) === 'function' && define.amd) { // AMD
+    } else if (typeof(define) === 'function' && define.amd) {
         define("detect-zoom", function () {
             return factory(ns, root);
         });
     } else {
         root[ns] = factory(ns, root);
     }
-
 }(window, 'detectZoom', function () {
     var devicePixelRatio = function () {
         return window.devicePixelRatio || 1;
@@ -1788,8 +1789,9 @@ raylib_like_api = {
 		}
 		if (cyclic)
 			path += 'Z';
-		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + '" viewBox="' + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + '" style="overflow:hidden;top:0;right:0;bottom:0;left:0;max-width:100vw;max-height:100vh;position:absolute;z-index:' + zIndex + '" collide="' + collide + `">
-    <g transform="scale(` + size_[0] + ' ' + -size_[1] + `)translate(0 0)">
+		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + '" viewBox="' + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + `
+		" style="overflow:hidden;top:0;right:0;bottom:0;left:0;max-width:100vw;max-height:100vh;position:absolute;z-index:` + zIndex + '" collide="' + collide + '" pos="' + position_[0] + ' ' + position_[1] + '" size="' + size_[0] + ' ' + size_[1] + `">
+    <g transform="scale(1, -1)">
       <path id="Material" style="fill:rgb(` + color_[0] + ' ' + color_[1] + ' ' + color_[2] + `)" d="`;
 		var suffix = `"/>
     </g>
