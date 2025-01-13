@@ -2266,7 +2266,7 @@ class ScriptsPanel (bpy.types.Panel):
 				row = self.layout.row()
 				row.prop(ob, 'apiScript' + str(i))
 				row.prop(ob, 'jsScript' + str(i))
-				row.prop(ob, 'apiScript%sDisable' + str(i))
+				row.prop(ob, 'apiScript%sDisable' %i)
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
 		foundUnassignedScript = False
