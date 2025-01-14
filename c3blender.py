@@ -371,17 +371,23 @@ def ToVector3 (v : Vector):
 # 	else:
 # 		return Vector((int(v.x), int(v.y), int(v.z)))
 
-# def GetMinComponents (v : Vector, v2 : Vector, use2D : bool = False):
-# 	if use2D:
-# 		return Vector((min(v.x, v2.x), min(v.y, v2.y)))
-# 	else:
-# 		return Vector((min(v.x, v2.x), min(v.y, v2.y), min(v.z, v2.z)))
+def GetMinComponents (v : Vector, v2 : Vector, use2D : bool = False):
+	if use2D:
+		return Vector(( min(v.x, v2.x), min(v.y, v2.y) ))
+	else:
+		return Vector(( min(v.x, v2.x), min(v.y, v2.y), min(v.z, v2.z) ))
 
-# def GetMaxComponents (v : Vector, v2 : Vector, use2D : bool = False):
-# 	if use2D:
-# 		return Vector((max(v.x, v2.x), max(v.y, v2.y)))
-# 	else:
-# 		return Vector((max(v.x, v2.x), max(v.y, v2.y), max(v.z, v2.z)))
+def GetMaxComponents (v : Vector, v2 : Vector, use2D : bool = False):
+	if use2D:
+		return Vector(( max(v.x, v2.x), max(v.y, v2.y) ))
+	else:
+		return Vector(( max(v.x, v2.x), max(v.y, v2.y), max(v.z, v2.z) ))
+
+def Divide (v : Vector, v2 : Vector, use2D : bool = False):
+	if use2D:
+		return Vector(( v.x / v2.x, v.y / v2.y ))
+	else:
+		return Vector(( v.x / v2.x, v.y / v2.y, v.z / v2.z ))
 
 # def QuantizeVectorComponentText (value : str, isXComponent : bool, ob, offset : Vector, foundOffset : bool):
 # 	value = float(value)
@@ -412,6 +418,9 @@ def ToVector3 (v : Vector):
 # 	value *= bpy.data.worlds[0].c3_export_scale
 # 	return str(value)
 
+def ToNormalizedPoint (minMax : [],  v : Vector):
+	return Divide(Vector(( 1, 1 )), (minMax[1] - minMax[0]), True) * (v - minMax[0])
+
 def ToC3 (s : str):
 	newStr = '{'
 	charCount = 0
@@ -424,7 +433,7 @@ def ToC3 (s : str):
 	newStr += '}'
 	return newStr, charCount
 
-def GetCurveBoundsMinMax (ob):
+def GetCurveRectMinMax (ob):
 	bounds = [( ob.matrix_world @ Vector(corner) ) for corner in ob.bound_box]
 	box = []
 	box.append(min([ bounds[0][0], bounds[1][0], bounds[2][0], bounds[3][0] ]))
@@ -446,6 +455,7 @@ draw  = []
 svgText = ''
 userWasmExtern = ''
 userJsLibAPIEnv = ''
+svgRect = [ Vector(( float('inf'), float('inf') )), Vector(( -float('inf'), -float('inf') )) ]
 
 def ExportObject (ob):
 	global draw
@@ -550,7 +560,9 @@ def ExportObject (ob):
 		indexOfParentGroupStart = svgText_.find(parentGroupIndicator)
 		indexOfParentGroupContents = svgText_.find('\n', indexOfParentGroupStart + len(parentGroupIndicator))
 		indexOfParentGroupEnd = svgText_.rfind('</g')
-		min, max = GetCurveBoundsMinMax(ob)
+		min, max = GetCurveRectMinMax(ob)
+		min = ToNormalizedPoint(svgRect, min)
+		max = ToNormalizedPoint(svgRect, max)
 		setup.append('	objects[%s].position = { %s, %s };' %( idx, min.x, min.y ))
 		setup.append('	objects[%s].scale = { %s, %s };' %( idx, (max.x - min.x), (max.y - min.y) ))
 		svgText_ = svgText_[: indexOfParentGroupContents] + group + svgText_[indexOfParentGroupEnd :]
@@ -682,6 +694,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	global meshes
 	global curves
 	global svgText
+	global svgRect
 	global exportedObs
 	global userWasmExtern
 	global userJsLibAPIEnv
@@ -732,8 +745,12 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	datas = {}
 	prevParentName = None
 	bpy.ops.object.select_all(action = 'DESELECT')
+	svgRect = [ Vector(( float('inf'), float('inf') )), Vector(( -float('inf'), -float('inf') )) ]
 	for ob in bpy.data.objects:
 		if ob.type == 'CURVE':
+			min, max = GetCurveRectMinMax(ob)
+			svgRect[0] = GetMinComponents(svgRect[0], min, True)
+			svgRect[1] = GetMaxComponents(svgRect[1], max, True)
 			ob.select_set(True)
 	bpy.ops.curve.export_svg()
 	svgText = open('/tmp/Output.svg', 'r').read()
@@ -914,13 +931,13 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 				continue
 			head.append('float %s_%s = %s;' %(sname, prop, ob[prop]))
 			props[prop] = ob[prop]
-		# user C3 scripts
+		# User C3 scripts
 		for s in scripts:
 			for prop in props:
 				if 'self.' + prop in s:
 					s = s.replace('self.' + prop, '%s_%s'%(sname,prop))
 			draw.append('\t' + s)
-		# save object state: from stack back to heap
+		# Save object state: from stack back to heap
 		draw.append('	objects[%s] = self; // %s' %(obIndex, ob.name))
 	for a in datas[dname]['draw']:
 		r, g, b, alpha = a['color']
@@ -928,7 +945,7 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 		g = int(g * 255)
 		b = int(b * 255)
 		if not scripts:
-			# static grease pencil
+			# Static grease pencil
 			if a['fill']:
 				draw.append('	draw_spline_wasm(&__%s__%s_%s, %s, %s, %s, %s,%s,%s,%s);' %(dname, a['layer'], a['index'], a['length'], a['width'], a['fill'], r, g, b, alpha))
 			else:
@@ -946,7 +963,7 @@ def GetDeltaDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
 	x, y, z = ob.location * SCALE
 	sx, sy, sz = ob.scale
 	gkey = (dname, gquant)
-	# TODO only gen single packer per quant
+	# TODO Only gen single packer per quant
 	qkey = gquant.split('bit')[0]
 	return [
 		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0) @extern("u%s") {' %(dname, gquant, qkey),
@@ -1025,7 +1042,7 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 							tris.append(tri.v3)
 						tris = ','.join([str(vidx) for vidx in tris])
 						data.append('int[%s] __%s__%s_%s_tris = {%s};' %( len(stroke.triangles)*3,dname, lidx, sidx, tris ))
-					# default 32bit floats #
+					# Default 32bit floats
 					for pnt in stroke.points:
 						x1,y1,z1 = pnt.position
 						x1 *= sx
@@ -1052,7 +1069,7 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 						');',
 					]
 				else:
-					# default 32bit floats #
+					# Default 32bit floats
 					s = []
 					for pnt in stroke.points:
 						x1,y1,z1 = pnt.position
@@ -1153,15 +1170,15 @@ def Quantizer (points, quant, trim = True):
 		if quant in ('6bits', '7bits'):
 			if mvec:
 				mdx, mdz = mvec[0]
-				# delta of delta
+				# Delta of delta
 				ddx = mdx-dx
 				ddy = mdz-dz
-				if quant == '6bits':  # after 5bits
+				if quant == '6bits':  # After 5bits
 					if ddx >= 16: ddx = 15
 					elif ddx < -16: ddx = -16
 					if ddy >= 16: ddy = 15
 					elif ddy < -16: ddy = -16
-				else:  # after 4bits
+				else:  # After 4bits
 					if ddx >= 8: ddx = 7
 					elif ddx < -8: ddx = -8
 					if ddy >= 8: ddy = 7
@@ -1349,7 +1366,7 @@ function make_environment(e){
 			if(e[p]!==undefined){return e[p].bind(e)}
 			return(...args)=>{throw p}
 		}
-	});
+	})
 }
 function get_pos_and_size (elmt)
 {
@@ -1361,11 +1378,26 @@ function get_pos_and_size (elmt)
 	var size = sizeTxt.split(' ');
 	var sizeX = parseFloat(size[0]);
 	var sizeY = parseFloat(size[1]);
-	return [ [ posX, posY ], [ sizeX, sizeY ] ];
+	return [ [ posX, posY ], [ sizeX, sizeY ] ]
+}
+function lerp (min, max, t)
+{
+	return min + t * (max - min)
+}
+function scale_by_rect (pos, size, rect)
+{
+    size[0] *= rect.width;
+    size[1] *= rect.height;
+    pos[0] = lerp(rect.x, rect.right, pos[0]);
+    pos[1] = lerp(rect.bottom, rect.y, pos[1]) - size[1];
+	return [ pos, size ]
 }
 function overlaps (pos, size, pos2, size2)
 {
-	return pos[0] > pos2[0] + size2[0] && pos[0] + size[0] < pos2[0] && pos[1] > pos2[1] + size2[1] && pos[1] + size[1] < pos2[1];
+	return !(pos[0] + size[0] < pos2[0]
+		|| pos[0] > pos2[0] + size2[0]
+		|| pos[1] + size[1] < pos2[1]
+		|| pos[1] > pos2[1] + size2[1])
 }
 (function (root, ns, factory) {
     "use strict";
@@ -1374,10 +1406,10 @@ function overlaps (pos, size, pos2, size2)
         module.exports = factory(ns, root);
     } else if (typeof(define) === 'function' && define.amd) {
         define("detect-zoom", function () {
-            return factory(ns, root);
+            return factory(ns, root)
         });
     } else {
-        root[ns] = factory(ns, root);
+        root[ns] = factory(ns, root)
     }
 }(window, 'detectZoom', function () {
     var devicePixelRatio = function () {
@@ -1387,21 +1419,21 @@ function overlaps (pos, size, pos2, size2)
         return {
             zoom: 1,
             devicePxPerCssPx: 1
-        };
+        }
     };
     var ie8 = function () {
         var zoom = Math.round((screen.deviceXDPI / screen.logicalXDPI) * 100) / 100;
         return {
             zoom: zoom,
             devicePxPerCssPx: zoom * devicePixelRatio()
-        };
+        }
     };
     var ie10 = function () {
         var zoom = Math.round((document.documentElement.offsetHeight / window.innerHeight) * 100) / 100;
         return {
             zoom: zoom,
             devicePxPerCssPx: zoom * devicePixelRatio()
-        };
+        }
     };
     var chrome = function()
     {
@@ -1409,7 +1441,7 @@ function overlaps (pos, size, pos2, size2)
         return {
             zoom: zoom,
             devicePxPerCssPx: zoom * devicePixelRatio()
-        };	    
+        }
     }
     var safari= function()
     {
@@ -1417,7 +1449,7 @@ function overlaps (pos, size, pos2, size2)
         return {
             zoom: zoom,
             devicePxPerCssPx: zoom * devicePixelRatio()
-        };	    
+        }
     }
     var webkitMobile = function () {
         var deviceWidth = (Math.abs(window.orientation) == 90) ? screen.height : screen.width;
@@ -1425,8 +1457,8 @@ function overlaps (pos, size, pos2, size2)
         return {
             zoom: zoom,
             devicePxPerCssPx: zoom * devicePixelRatio()
-        };
-    };
+        }
+    }
     var webkit = function () {
         var important = function (str) {
             return str.replace(/;/g, " !important;");
@@ -1444,8 +1476,8 @@ function overlaps (pos, size, pos2, size2)
         return{
             zoom: zoom,
             devicePxPerCssPx: zoom * devicePixelRatio()
-        };
-    };
+        }
+    }
     var firefox4 = function () {
         var zoom = mediaQueryBinarySearch('min--moz-device-pixel-ratio', '', 0, 10, 20, 0.0001);
         zoom = Math.round(zoom * 100) / 100;
@@ -2047,6 +2079,7 @@ def GenHtml (world, wasm, c3, user_html = None, background = '', user_methods = 
 		hsize = len('\n'.join(o))
 	else:
 		o = [
+			'<!DOCTYPE html>',
 			'<html>',
 			'<body % sstyle="width:600px;height:300px;overflow:hidden;">' % background,
 			'<canvas id="$"></canvas>',
@@ -2349,11 +2382,11 @@ if __name__ == '__main__':
 						rightHandle.rotate(prevRot)
 				if ob.scale != Vector(( 1, 1, 1 )):
 					prevScale = ob.scale
-					prevMin, prevMax = GetCurveBoundsMinMax(ob)
+					prevMin, prevMax = GetCurveRectMinMax(ob)
 					ob.scale = Vector(( 1, 1, 1 ))
 					for point in points:
 						point.co *= prevScale
-					_min, _max = GetCurveBoundsMinMax(ob)
+					_min, _max = GetCurveRectMinMax(ob)
 					ob.location += ToVector3(prevMin - _min)
 	if '--test' in sys.argv or test:
 		import c3blendgen
