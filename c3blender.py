@@ -601,7 +601,6 @@ def ExportObject (ob):
 		collideStr = str(ob.collide).lower()
 		setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[4]*) &%s, (char[]*) &%s, %s, %s, %s, %s);'
 			%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'VIEW_BOX_' + sname.upper(), 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr ))
-		draw.append('	randomize_svg((char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, isCyclicStr, 0.3 ))
 	elif ob.type == 'FONT' and wasm:
 		cscale = ob.data.size * SCALE
 		if use_html:
@@ -748,6 +747,8 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	svgRect = [ Vector(( float('inf'), float('inf') )), Vector(( -float('inf'), -float('inf') )) ]
 	for ob in bpy.data.objects:
 		if ob.type == 'CURVE':
+			if ob.hide_get():
+				continue
 			min, max = GetCurveRectMinMax(ob)
 			svgRect[0] = GetMinComponents(svgRect[0], min, True)
 			svgRect[1] = GetMaxComponents(svgRect[1], max, True)
@@ -966,25 +967,25 @@ def GetDeltaDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
 	# TODO Only gen single packer per quant
 	qkey = gquant.split('bit')[0]
 	return [
-		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0) @extern("u%s") {' %(dname, gquant, qkey),
+		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0) @extern("u%s") {' %( dname, gquant, qkey ),
 		'	int j=0;',
-		'	out[0].x = (x0*%sf) + %sf;' %(qs * sx, offX + x),
-		'	out[0].y = -(z0*%sf) + %sf;'  %(qs * sz, offY + z),
+		'	out[0].x = (x0*%sf) + %sf;' %( qs * sx, offX + x ),
+		'	out[0].y = -(z0*%sf) + %sf;'  %( qs * sz, offY + z ),
 		'	for (int i=0; i<len; i++){',
-		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %(qs * sx, offX + x),
-		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' %(qs * sz, offY + z),
+		'		float ax = ( (x0 - pak[i].x0) * %sf) + %sf;' %( qs * sx, offX + x ),
+		'		float ay = ( -(z0 - pak[i].y0) * %sf) + %sf;' %( qs * sz, offY + z ),
 
 		'		j++;',
 		'		out[j].x = ax;',
 		'		out[j].y = ay;',
 
 		'		j++;',
-		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x1)) * %sf) + %sf;' %(qs * sx, offX + x),
-		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y1)) * %sf) + %sf;' %(qs * sz, offY + z),
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x1)) * %sf) + %sf;' %( qs * sx, offX + x ),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y1)) * %sf) + %sf;' %( qs * sz, offY + z ),
 
 		'		j++;',
-		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' %(qs * sx, offX + x),
-		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' %(qs * sz, offY + z),
+		'		out[j].x = ((x0 - (float)(pak[i].x0 - pak[i].x2)) * %sf) + %sf;' %( qs * sx, offX + x ),
+		'		out[j].y = ( -(z0 - (float)(pak[i].y0 - pak[i].y2)) * %sf) + %sf;' %( qs * sz, offY + z ),
 		'	}',
 		'}'
 	]
@@ -995,12 +996,12 @@ def GetDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
 	gkey = (dname, gquant)
 	return [
 		'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
-		'	out[0].x = (x0*%sf) + %sf;' %(qs * sx, offX + x),
-		'	out[0].y = -(z0*%sf) + %sf;'  %(qs * sz, offY + z),
+		'	out[0].x = (x0*%sf) + %sf;' %( qs * sx, offX + x ),
+		'	out[0].y = -(z0*%sf) + %sf;'  %( qs * sz, offY + z ),
 		'	for (int i = 0; i < len; i ++){',
-		'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs * sx, offX + x),
+		'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %( qs * sx, offX + x ),
 		'		out[i + 1].x = a;',
-		'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' %(qs * sz, offY + z),
+		'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' %( qs * sz, offY + z ),
 		'		out[i + 1].y = a;',
 		'	}',
 		'}'
@@ -1041,15 +1042,15 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 							tris.append(tri.v2)
 							tris.append(tri.v3)
 						tris = ','.join([str(vidx) for vidx in tris])
-						data.append('int[%s] __%s__%s_%s_tris = {%s};' %( len(stroke.triangles)*3,dname, lidx, sidx, tris ))
+						data.append('int[%s] __%s__%s_%s_tris = {%s};' %( len(stroke.triangles) * 3,dname, lidx, sidx, tris ))
 					# Default 32bit floats
 					for pnt in stroke.points:
 						x1,y1,z1 = pnt.position
 						x1 *= sx
 						z1 *= sz
-						s.append('{%s,%s}' %(x1 + offX + x, -z1 + offY + z))
+						s.append('{%s,%s}' %( x1 + offX + x, -z1 + offY + z ))
 					n = len(s)
-					data.append('Vector2[%s] __%s__%s_%s = {%s};' %(n, dname, lidx, sidx, ','.join(s) ))
+					data.append('Vector2[%s] __%s__%s_%s = {%s};' %( n, dname, lidx, sidx, ','.join(s) ))
 				elif gquant:
 					qstroke = Quantizer(stroke.points, gquant)
 					n = len(qstroke['points'])
@@ -1065,7 +1066,7 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 						'_unpacker_%s(&__%s__%s_%s_pak,' %(dname, dname, lidx, sidx),
 						'	&__%s__%s_%s,' %(dname, lidx, sidx),
 						'	%s,' % len(stroke. points),
-						'	%s, %s' %(x0 * q, z0 * q),
+						'	%s, %s' %( x0 * q, z0 * q ),
 						');',
 					]
 				else:
@@ -1083,25 +1084,25 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 				if use_fill:
 					clr = '{%s,%s,%s,%s}' %(int(r * 255), int(g * 255), int(b * 255), int(a * 255))
 					if mat.c3_export_trifan:
-						draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' %(dname, lidx, sidx, n, clr))
+						draw.append('	raylib::draw_triangle_fan(&__%s__%s_%s, %s, %s);' %( dname, lidx, sidx, n, clr ))
 					elif mat.c3_export_tristrip:
-						draw.append('	raylib::draw_triangle_strip(&__%s__%s_%s, %s, %s);' %(dname, lidx, sidx, n, clr))
+						draw.append('	raylib::draw_triangle_strip(&__%s__%s_%s, %s, %s);' %( dname, lidx, sidx, n, clr ))
 					else:
 						draw += [
 							'	for (int i=0; i<%s; i+=3){' %(len(stroke.triangles) * 3),
-							'		int idx = __%s__%s_%s_tris[i+2];' %(dname, lidx, sidx),
-							'		Vector2 v1 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
-							'		idx = __%s__%s_%s_tris[i+1];'   %(dname, lidx, sidx),
-							'		Vector2 v2 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
-							'		idx = __%s__%s_%s_tris[i+0];'   %(dname, lidx, sidx),
-							'		Vector2 v3 = __%s__%s_%s[idx];' %(dname, lidx, sidx),
+							'		int idx = __%s__%s_%s_tris[i+2];' %( dname, lidx, sidx ),
+							'		Vector2 v1 = __%s__%s_%s[idx];' %( dname, lidx, sidx ),
+							'		idx = __%s__%s_%s_tris[i+1];'   %( dname, lidx, sidx ),
+							'		Vector2 v2 = __%s__%s_%s[idx];' %( dname, lidx, sidx ),
+							'		idx = __%s__%s_%s_tris[i+0];'   %( dname, lidx, sidx ),
+							'		Vector2 v3 = __%s__%s_%s[idx];' %( dname, lidx, sidx ),
 							'		raylib::draw_triangle(v1,v2,v3, %s);' % clr,
 							'	}',
 						]
 					if mat.grease_pencil.show_stroke:
-						draw.append('	raylib::draw_spline( (&__%s__%s_%s), %s, 4.0, {0x00,0x00,0x00,0xFF});' %(dname, lidx, sidx, n))
+						draw.append('	raylib::draw_spline( (&__%s__%s_%s), %s, 4.0, {0x00,0x00,0x00,0xFF});' %( dname, lidx, sidx, n ))
 				else:
-					draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, %s, {0x00,0x00,0x00,0xFF});' %(dname, lidx, sidx, n, swidth))
+					draw.append('	raylib::draw_spline(&__%s__%s_%s, %s, %s, {0x00,0x00,0x00,0xFF});' %( dname, lidx, sidx, n, swidth ))
 		head += data
 		if gquant:
 			x, y, z = ob.location * SCALE
@@ -1109,12 +1110,12 @@ def GreaseToC3Raylib (ob, datas, head, draw, setup):
 			gkey = ( dname, gquant )
 			head += [
 				'fn void _unpacker_%s(Vector2_%s *pak, Vector2 *out, int len, float x0, float z0){' %gkey,
-				'	out[0].x = (x0*%sf) + %sf;' %(qs * sx, offX + x),
-				'	out[0].y = -(z0*%sf) + %sf;'  %(qs * sz, offY + z),
+				'	out[0].x = (x0*%sf) + %sf;' %( qs * sx, offX + x ),
+				'	out[0].y = -(z0*%sf) + %sf;'  %( qs * sz, offY + z ),
 				'	for (int i = 0; i < len; i ++){',
-				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %(qs * sx, offX + x),
+				'		float a = ( (x0 - pak[i].x) * %sf) + %sf;' %( qs * sx, offX + x ),
 				'		out[i + 1].x = a;',
-				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' %(qs * sz, offY + z),
+				'		a = ( -(z0 - pak[i].y) * %sf) + %sf;' %( qs * sz, offY + z ),
 				'		out[i + 1].y = a;',
 				'	}',
 				'}'
@@ -1368,6 +1369,47 @@ function make_environment(e){
 		}
 	})
 }
+'''
+JS_LIB_API_ENV_MINI = '''
+function make_environment(e){
+	return new Proxy(e,{
+		get(t,p,r){return e[p].bind(e)}
+	});
+}
+'''
+JS_LIB_API = '''
+function cstrlen(m,p){
+	var l=0;
+	while(m[p]!=0){l++;p++}
+	return l;
+}
+function cstr_by_ptr (m, p)
+{
+	const l = cstrlen(new Uint8Array(m), p);
+	const b = new Uint8Array(m, p, l);
+	return new TextDecoder().decode(b)
+}
+function random_vector_2d (maxDist)
+{
+	var offsetDist = Math.random() * maxDist;
+	var offsetAng = Math.random() * 2 * Math.PI;
+	var offsetX = Math.cos(offsetAng) * offsetDist;
+	var offsetY = Math.sin(offsetAng) * offsetDist;
+	return [ offsetX, offsetY ]
+}
+function get_path (pathData, pathDataLen, cyclic)
+{
+	var path = 'M ' + (pathData[0] - 128) + ',' + (pathData[1] - 128) + ' ';
+	for (var i = 2; i < pathDataLen; i += 2)
+	{
+		if (i - 2 % 6 == 0)
+			path += 'C ';
+		path += '' + (pathData[i] - 128) + ',' + (pathData[i + 1] - 128) + ' ';
+	}
+	if (cyclic)
+		path += 'Z';
+	return path;
+}
 function get_pos_and_size (elmt)
 {
 	var posTxt = elmt.getAttribute('pos');
@@ -1417,46 +1459,40 @@ function overlaps (pos, size, pos2, size2)
     };
     var fallback = function () {
         return {
-            zoom: 1,
-            devicePxPerCssPx: 1
+            zoom: 1
         }
     };
     var ie8 = function () {
         var zoom = Math.round((screen.deviceXDPI / screen.logicalXDPI) * 100) / 100;
         return {
-            zoom: zoom,
-            devicePxPerCssPx: zoom * devicePixelRatio()
+            zoom: zoom
         }
     };
     var ie10 = function () {
         var zoom = Math.round((document.documentElement.offsetHeight / window.innerHeight) * 100) / 100;
         return {
-            zoom: zoom,
-            devicePxPerCssPx: zoom * devicePixelRatio()
+            zoom: zoom
         }
     };
     var chrome = function()
     {
         var zoom = Math.round(((window.outerWidth) / window.innerWidth)*100) / 100;
         return {
-            zoom: zoom,
-            devicePxPerCssPx: zoom * devicePixelRatio()
+            zoom: zoom
         }
     }
     var safari= function()
     {
         var zoom = Math.round(((document.documentElement.clientWidth) / window.innerWidth)*100) / 100;
         return {
-            zoom: zoom,
-            devicePxPerCssPx: zoom * devicePixelRatio()
+            zoom: zoom
         }
     }
     var webkitMobile = function () {
         var deviceWidth = (Math.abs(window.orientation) == 90) ? screen.height : screen.width;
         var zoom = deviceWidth / window.innerWidth;
         return {
-            zoom: zoom,
-            devicePxPerCssPx: zoom * devicePixelRatio()
+            zoom: zoom
         }
     }
     var webkit = function () {
@@ -1474,30 +1510,26 @@ function overlaps (pos, size, pos2, size2)
         zoom = Math.round(zoom * 100) / 100;
         document.body.removeChild(container);
         return{
-            zoom: zoom,
-            devicePxPerCssPx: zoom * devicePixelRatio()
+            zoom: zoom
         }
     }
     var firefox4 = function () {
         var zoom = mediaQueryBinarySearch('min--moz-device-pixel-ratio', '', 0, 10, 20, 0.0001);
         zoom = Math.round(zoom * 100) / 100;
         return {
-            zoom: zoom,
-            devicePxPerCssPx: zoom
+            zoom: zoom
         };
     };
     var firefox18 = function () {
         return {
-            zoom: firefox4().zoom,
-            devicePxPerCssPx: devicePixelRatio()
+            zoom: firefox4().zoom
         };
     };
     var opera11 = function () {
         var zoom = window.top.outerWidth / window.top.innerWidth;
         zoom = Math.round(zoom * 100) / 100;
         return {
-            zoom: zoom,
-            devicePxPerCssPx: zoom * devicePixelRatio()
+            zoom: zoom
         };
     };
     var mediaQueryBinarySearch = function (property, unit, a, b, maxIter, epsilon) {
@@ -1575,42 +1607,9 @@ function overlaps (pos, size, pos2, size2)
     return ({
         zoom: function () {
             return detectFunction().zoom;
-        },
-        device: function () {
-            return detectFunction().devicePxPerCssPx;
         }
     });
 }));
-'''
-JS_LIB_API_ENV_MINI = '''
-function make_environment(e){
-	return new Proxy(e,{
-		get(t,p,r){return e[p].bind(e)}
-	});
-}
-'''
-JS_LIB_API = '''
-function cstrlen(m,p){
-	var l=0;
-	while(m[p]!=0){l++;p++}
-	return l;
-}
-
-function cstr_by_ptr (m, p)
-{
-	const l = cstrlen(new Uint8Array(m), p);
-	const b = new Uint8Array(m, p, l);
-	return new TextDecoder().decode(b)
-}
-
-function random_vector_2d (maxDist)
-{
-	var offsetDist = Math.random() * maxDist;
-	var offsetAng = Math.random() * 2 * Math.PI;
-	var offsetX = Math.cos(offsetAng) * offsetDist;
-	var offsetY = Math.sin(offsetAng) * offsetDist;
-	return [ offsetX, offsetY ]
-}
 
 class api{
 	proxy(){
@@ -1812,15 +1811,7 @@ raylib_like_api = {
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		const viewBox_ = new Uint8Array(buf, viewBox, 4);
 		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
-		var path = 'M' + (pathData_[0] - 128) + ',' + (pathData_[1] - 128) + ' ';
-		for (var i = 2; i < pathDataLen; i += 2)
-		{
-			if (i - 2 % 6 == 0)
-				path += 'C';
-			path += '' + (pathData_[i] - 128) + ',' + (pathData_[i + 1] - 128) + ' ';
-		}
-		if (cyclic)
-			path += 'Z';
+		var path = get_path(pathData_, pathDataLen, cyclic);
 		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + '" viewBox="' + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + `
 		" style="overflow:hidden;top:0;right:0;bottom:0;left:0;max-width:100vw;max-height:100vh;position:absolute;z-index:` + zIndex + '" collide="' + collide + '" pos="' + position_[0] + ' ' + position_[1] + '" size="' + size_[0] + ' ' + size_[1] + `">
     <g transform="scale(1, -1)">
@@ -1832,12 +1823,13 @@ raylib_like_api = {
 	}
 	''',
 	'SetSvgPath' : '''
-	SetSvgPath (id, idLen, pathData, pathDataLen)
+	SetSvgPath (id, idLen, pathData, pathDataLen, cyclic)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
-		const pathData_ = new TextDecoder().decode(new Uint8Array(buf, pathData, pathDataLen));
-		document.getElementById(id_).children[0].children[0].setAttribute("d", pathData_);
+		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
+		var path = get_path(pathData_, pathDataLen, cyclic);
+		document.getElementById(id_).children[0].children[0].setAttribute('d', path);
 	}
 	''',
 	'RandomizeSvg' : '''
@@ -1847,17 +1839,17 @@ raylib_like_api = {
 		var id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		const initPathData_ = new Uint8Array(buf, initPathData, initPathDataLen);
 		var offset = random_vector_2d(maxDist);
-		var path = 'M' + (initPathData_[0] - 128 + offset[0]) + ',' + (initPathData_[1] - 128 + offset[1]) + ' ';
+		var path = 'M ' + (initPathData_[0] - 128 + offset[0]) + ',' + (initPathData_[1] - 128 + offset[1]) + ' ';
 		for (var i = 2; i < initPathDataLen; i += 2)
 		{
 			var offset = random_vector_2d(maxDist);
 			if (i - 2 % 6 == 0)
-				path += 'C';
+				path += 'C ';
 			path += '' + (initPathData_[i] - 128 + offset[0]) + ',' + (initPathData_[i + 1] - 128 + offset[1]) + ' ';
 		}
 		if (cyclic)
 			path += 'Z';
-		document.getElementById(id_).children[0].children[0].setAttribute("d", path);
+		document.getElementById(id_).children[0].children[0].setAttribute('d', path);
 	}
 	''',
 	'ClearBackground' : '''
