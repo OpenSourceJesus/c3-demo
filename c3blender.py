@@ -2045,6 +2045,38 @@ def BuildWasm (world):
 
 	return wasm
 
+def Update ():
+	for ob in bpy.data.objects:
+		if len(ob.material_slots) == 0 or ob.material_slots[0].material == None:
+			continue
+		mat = ob.material_slots[0].material
+		indexOfPeriod = mat.name.find('.')
+		if indexOfPeriod != -1:
+			origName = mat.name[: indexOfPeriod]
+			for ob2 in bpy.data.objects:
+				if len(ob2.material_slots) > 0 and ob2.material_slots[0].material.name == origName:
+					ob.material_slots[0].material = ob2.material_slots[0].material
+			bpy.data.materials.remove(mat)
+	for txt in bpy.data.texts:
+		indexOfPeriod = txt.name.find('.')
+		if indexOfPeriod != -1:
+			for ob in bpy.data.objects:
+				for i in range(MAX_SCRIPTS_PER_OBJECT):
+					attachedTxt = getattr(ob, 'apiScript' + str(i))
+					if attachedTxt == txt:
+						for origTxt in bpy.data.texts:
+							if origTxt.name == txt.name[: indexOfPeriod]:
+								setattr(ob, 'apiScript' + str(i), origTxt)
+								break
+					attachedTxt = getattr(ob, 'runtimeScript' + str(i))
+					if attachedTxt == txt:
+						for origTxt in bpy.data.texts:
+							if origTxt.name == txt.name[: indexOfPeriod]:
+								setattr(ob, 'runtimeScript' + str(i), origTxt)
+								break
+			bpy.data.texts.remove(txt)
+	return 0.1
+
 bpy.types.Material.c3_export_trifan = bpy.props.BoolProperty(name = 'Triangle fan')
 bpy.types.Material.c3_export_tristrip = bpy.props.BoolProperty(name = 'Triangle strip')
 
@@ -2200,9 +2232,11 @@ if __name__ == '__main__':
 			bpy.data.worlds[0].c3_miniapi = True
 			bpy.data.worlds[0].c3_js13kb = True
 			bpy.data.worlds[0].c3_invalid_html = True
+	bpy.app.timers.register(Update)
 	for ob in bpy.data.objects:
-		if ob.type in [ 'MESH', 'CURVE' ] and len(ob.material_slots) > 0:
-			ob.material_slots[0].material.use_nodes = False
+		if ob.type in [ 'MESH', 'CURVE' ]:
+			if len(ob.material_slots) > 0 and ob.material_slots[0].material != None:
+				ob.material_slots[0].material.use_nodes = False
 			ob.name = ob.name.replace('é', 'e')
 			if ob.type == 'CURVE':
 				isRotated = False
