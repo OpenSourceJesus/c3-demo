@@ -204,8 +204,8 @@ struct Vector2_16bits @packed {
 '''
 HEADER_OBJECT = '''
 struct Object {
-	Vector2 position;
-	Vector2 velocity;
+	Vector2 pos;
+	Vector2 vel;
 	Vector2 scale;
 	Color color;
 	int id;
@@ -281,7 +281,7 @@ extern fn float random () @extern("random");
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* position, Vector2* size, Color* color, bool hide, char[]* id, int idLen, char[4]* viewBox, char[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide) @extern("DrawSvg");
+extern fn void draw_svg (Vector2* pos, Vector2* size, Color* color, bool hide, char[]* id, int idLen, char[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide) @extern("DrawSvg");
 extern fn void set_svg_path (char[]* id, int idLen, char[]* pathData, int pathDataLen) @extern("SetSvgPath");
 extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, bool cyclic, float maxDist) @extern("RandomizeSvg");
 
@@ -306,6 +306,7 @@ extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
 
 extern fn void add_group (char[]* id, int idLen, char[]* firstAndLastChildIds, int firstAndLastChildIdsLen) @extern("AddGroup");
+extern fn void clone_element (char[]* id, int idLen, Vector2* pos) @extern("CloneElement");
 '''
 
 def GetScripts (ob, isAPI : bool):
@@ -491,7 +492,7 @@ def ExportObject (ob):
 			ExportObject (ob_)
 	elif ob.type == "MESH":
 		meshes.append(ob)
-		setup.append('	objects[%s].position = {%s,%s};' %( idx, x, z ))
+		setup.append('	objects[%s].pos = {%s,%s};' %( idx, x, z ))
 		setup.append('	objects[%s].scale = {%s,%s};' %( idx, sx, sz ))
 		#setup.append('	objects[%s].color=raylib::color_from_hsv(%s,1,1);' %( idx, random() ))
 		if len(ob.material_slots) > 0:
@@ -536,7 +537,7 @@ def ExportObject (ob):
 	elif ob.type == 'GREASEPENCIL':
 		meshes.append(ob)
 		if HasScript(ob, False):
-			setup.append('	objects[%s].position = { %s, %s };' %( idx, x, z ))
+			setup.append('	objects[%s].pos = { %s, %s };' %( idx, x, z ))
 			sx, sy, sz = ob.scale
 			setup.append('	objects[%s].scale = { %s, %s };' %( idx, sx, sz ))
 		if wasm:
@@ -545,11 +546,11 @@ def ExportObject (ob):
 			GreaseToC3Raylib (ob, datas, head, draw, setup)
 	elif ob.type == 'CURVE':
 		curves.append(ob)
-		if len(ob.material_slots) > 0:
-			materialColor = ob.material_slots[0].material.diffuse_color
-		else:
-			materialColor = DEFAULT_COLOR
-		setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
+		bpy.ops.object.select_all(action = 'DESELECT')
+		min, max = GetCurveRectMinMax(ob)
+		ob.select_set(True)
+		bpy.ops.curve.export_svg()
+		svgText = open('/tmp/Output.svg', 'r').read()
 		svgText_ = svgText
 		indexOfName = svgText_.find(ob.name)
 		indexOfGroupStart = svgText_.rfind('\n', 0, indexOfName)
@@ -561,20 +562,35 @@ def ExportObject (ob):
 		indexOfParentGroupContents = svgText_.find('\n', indexOfParentGroupStart + len(parentGroupIndicator))
 		indexOfParentGroupEnd = svgText_.rfind('</g')
 		min, max = GetCurveRectMinMax(ob)
-		min = ToNormalizedPoint(svgRect, min)
-		max = ToNormalizedPoint(svgRect, max)
-		setup.append('	objects[%s].position = { %s, %s };' %( idx, min.x, min.y ))
-		setup.append('	objects[%s].scale = { %s, %s };' %( idx, (max.x - min.x), (max.y - min.y) ))
+		min *= SCALE
+		min += off
+		max *= SCALE
+		max += off
+		setup.append('	objects[%s].pos = { %s, %s };' %( idx, min.x, max.y ))
+		for exportedOb in exportedObs:
+			indexOfPeriod = ob.name.find('.')
+			if indexOfPeriod == -1:
+				obNameWithoutPeriod = ob.name
+			else:
+				obNameWithoutPeriod = ob.name[: indexOfPeriod]
+			indexOfPeriod = exportedOb.name.find('.')
+			if indexOfPeriod == -1:
+				exportedObNameWithoutPeriod = exportedOb.name
+			else:
+				exportedObNameWithoutPeriod = exportedOb.name[: indexOfPeriod]
+			if obNameWithoutPeriod == exportedObNameWithoutPeriod:
+				idData, idDataLen = ToC3(exportedOb.name)
+				setup.append('	clone_element((char[]*) &%s, %s, &(objects[%s].pos));' %( 'ID_' + GetSafeName(exportedOb).upper(), idDataLen, idx ))
+				exportedObs.append(ob)
+				return
+		if len(ob.material_slots) > 0:
+			materialColor = ob.material_slots[0].material.diffuse_color
+		else:
+			materialColor = DEFAULT_COLOR
+		size = max - min
+		setup.append('	objects[%s].scale = { %s, %s };' %( idx, size.x, size.y ))
+		setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
 		svgText_ = svgText_[: indexOfParentGroupContents] + group + svgText_[indexOfParentGroupEnd :]
-		viewBoxIndicator = 'viewBox="'
-		indexOfViewBoxStart = svgText_.find(viewBoxIndicator) + len(viewBoxIndicator)
-		indexOfViewBoxEnd = svgText_.find('"', indexOfViewBoxStart)
-		viewBox = svgText_[indexOfViewBoxStart : indexOfViewBoxEnd]
-		viewBoxData = '{'
-		for value in viewBox.split(' '):
-			viewBoxData += str(round(float(value)) + 128) + ','
-		viewBoxData += '}'
-		head.append('const char[4] VIEW_BOX_%s = %s;' %( sname.upper(), viewBoxData ))
 		pathDataIndicator = ' d="'
 		indexOfPathDataStart = svgText_.find(pathDataIndicator) + len(pathDataIndicator)
 		indexOfPathDataEnd = svgText_.find('"', indexOfPathDataStart)
@@ -583,15 +599,25 @@ def ExportObject (ob):
 		pathData_ = []
 		pathDataLen = 0
 		vectors = pathData.split(' ')
+		minPathValue = Vector(( float('inf'), float('inf') ))
+		maxPathValue = Vector(( -float('inf'), -float('inf') ))
 		for vector in vectors:
 			if len(vector) == 1:
 				continue
 			components = vector.split(',')
 			x = int(components[0])
 			y = int(components[1])
-			pathData_.append(x + 128)
-			pathData_.append(y + 128)
+			vector = Vector(( x, y ))
+			minPathValue = GetMinComponents(minPathValue, vector, True)
+			maxPathValue = GetMaxComponents(maxPathValue, vector, True)
+			pathData_.append(x)
+			pathData_.append(y)
 			pathDataLen += 2
+		minPathValue *= SCALE
+		maxPathValue *= SCALE
+		offset = -minPathValue
+		for i, pathValue in enumerate(pathData_):
+			pathData_[i] = int(pathValue + offset[i % 2])
 		pathData_ = '{' + str(pathData_)[1 : -1] + '}'
 		head.append('const char[%s] PATH_DATA_%s = %s;' %( pathDataLen, sname.upper(), pathData_ ))
 		idData, idDataLen = ToC3(ob.name)
@@ -599,8 +625,8 @@ def ExportObject (ob):
 		cyclic = ob.data.splines[0].use_cyclic_u
 		isCyclicStr = str(cyclic).lower()
 		collideStr = str(ob.collide).lower()
-		setup.append('	draw_svg(&(objects[%s].position), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[4]*) &%s, (char[]*) &%s, %s, %s, %s, %s);'
-			%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'VIEW_BOX_' + sname.upper(), 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr ))
+		setup.append('	draw_svg(&(objects[%s].pos), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s, %s);'
+			%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr ))
 	elif ob.type == 'FONT' and wasm:
 		cscale = ob.data.size * SCALE
 		if use_html:
@@ -621,7 +647,7 @@ def ExportObject (ob):
 			dom_name = ''
 		if ob.parent and HasScript(ob.parent, False):
 			setup += [
-				'	objects[%s].position = {%s, %s};' %( idx, x + (cscale * 0.1), z - (cscale * 1.8) ),
+				'	objects[%s].pos = {%s, %s};' %( idx, x + (cscale * 0.1), z - (cscale * 1.8) ),
 				'	objects[%s].id = html_new_text("%s", %s,%s, %s, %s, "%s");' %( idx, ob.data.body, x + (cscale * 0.1), z - (cscale * 1.8), cscale, hide, dom_name ),
 			]
 		elif ob.parent:
@@ -743,18 +769,6 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	curves = []
 	datas = {}
 	prevParentName = None
-	bpy.ops.object.select_all(action = 'DESELECT')
-	svgRect = [ Vector(( float('inf'), float('inf') )), Vector(( -float('inf'), -float('inf') )) ]
-	for ob in bpy.data.objects:
-		if ob.type == 'CURVE':
-			if ob.hide_get():
-				continue
-			min, max = GetCurveRectMinMax(ob)
-			svgRect[0] = GetMinComponents(svgRect[0], min, True)
-			svgRect[1] = GetMaxComponents(svgRect[1], max, True)
-			ob.select_set(True)
-	bpy.ops.curve.export_svg()
-	svgText = open('/tmp/Output.svg', 'r').read()
 	for ob in bpy.data.objects:
 		ExportObject (ob)
 	for ob in bpy.data.objects:
@@ -1399,12 +1413,12 @@ function random_vector_2d (maxDist)
 }
 function get_path (pathData, pathDataLen, cyclic)
 {
-	var path = 'M ' + (pathData[0] - 128) + ',' + (pathData[1] - 128) + ' ';
+	var path = 'M ' + pathData[0] + ',' + pathData[1] + ' ';
 	for (var i = 2; i < pathDataLen; i += 2)
 	{
 		if (i - 2 % 6 == 0)
 			path += 'C ';
-		path += '' + (pathData[i] - 128) + ',' + (pathData[i + 1] - 128) + ' ';
+		path += '' + pathData[i] + ',' + pathData[i + 1] + ' ';
 	}
 	if (cyclic)
 		path += 'Z';
@@ -1412,14 +1426,14 @@ function get_path (pathData, pathDataLen, cyclic)
 }
 function get_pos_and_size (elmt)
 {
-	var posTxt = elmt.getAttribute('pos');
-	var pos = posTxt.split(' ');
-	var posX = parseFloat(pos[0]);
-	var posY = parseFloat(pos[1]);
-	var sizeTxt = elmt.getAttribute('size');
-	var size = sizeTxt.split(' ');
-	var sizeX = parseFloat(size[0]);
-	var sizeY = parseFloat(size[1]);
+	var posXTxt = elmt.getAttribute('x');
+	var posX = parseFloat(posXTxt);
+	var posYTxt = elmt.getAttribute('y');
+	var posY = parseFloat(posYTxt);
+	var sizeXTxt = elmt.getAttribute('width');
+	var sizeX = parseFloat(sizeXTxt);
+	var sizeYTxt = elmt.getAttribute('height');
+	var sizeY = parseFloat(sizeYTxt);
 	return [ [ posX, posY ], [ sizeX, sizeY ] ]
 }
 function lerp (min, max, t)
@@ -1441,175 +1455,6 @@ function overlaps (pos, size, pos2, size2)
 		|| pos[1] + size[1] < pos2[1]
 		|| pos[1] > pos2[1] + size2[1])
 }
-(function (root, ns, factory) {
-    "use strict";
-
-    if (typeof(module) !== 'undefined' && module.exports) {
-        module.exports = factory(ns, root);
-    } else if (typeof(define) === 'function' && define.amd) {
-        define("detect-zoom", function () {
-            return factory(ns, root)
-        });
-    } else {
-        root[ns] = factory(ns, root)
-    }
-}(window, 'detectZoom', function () {
-    var devicePixelRatio = function () {
-        return window.devicePixelRatio || 1;
-    };
-    var fallback = function () {
-        return {
-            zoom: 1
-        }
-    };
-    var ie8 = function () {
-        var zoom = Math.round((screen.deviceXDPI / screen.logicalXDPI) * 100) / 100;
-        return {
-            zoom: zoom
-        }
-    };
-    var ie10 = function () {
-        var zoom = Math.round((document.documentElement.offsetHeight / window.innerHeight) * 100) / 100;
-        return {
-            zoom: zoom
-        }
-    };
-    var chrome = function()
-    {
-        var zoom = Math.round(((window.outerWidth) / window.innerWidth)*100) / 100;
-        return {
-            zoom: zoom
-        }
-    }
-    var safari= function()
-    {
-        var zoom = Math.round(((document.documentElement.clientWidth) / window.innerWidth)*100) / 100;
-        return {
-            zoom: zoom
-        }
-    }
-    var webkitMobile = function () {
-        var deviceWidth = (Math.abs(window.orientation) == 90) ? screen.height : screen.width;
-        var zoom = deviceWidth / window.innerWidth;
-        return {
-            zoom: zoom
-        }
-    }
-    var webkit = function () {
-        var important = function (str) {
-            return str.replace(/;/g, " !important;");
-        };
-        var div = document.createElement('div');
-        div.innerHTML = "1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>0";
-        div.setAttribute('style', important('font: 100px/1em sans-serif; -webkit-text-size-adjust: none; text-size-adjust: none; height: auto; width: 1em; padding: 0; overflow: visible;'));
-        var container = document.createElement('div');
-        container.setAttribute('style', important('width:0; height:0; overflow:hidden; visibility:hidden; position: absolute;'));
-        container.appendChild(div);
-        document.body.appendChild(container);
-        var zoom = 1000 / div.clientHeight;
-        zoom = Math.round(zoom * 100) / 100;
-        document.body.removeChild(container);
-        return{
-            zoom: zoom
-        }
-    }
-    var firefox4 = function () {
-        var zoom = mediaQueryBinarySearch('min--moz-device-pixel-ratio', '', 0, 10, 20, 0.0001);
-        zoom = Math.round(zoom * 100) / 100;
-        return {
-            zoom: zoom
-        };
-    };
-    var firefox18 = function () {
-        return {
-            zoom: firefox4().zoom
-        };
-    };
-    var opera11 = function () {
-        var zoom = window.top.outerWidth / window.top.innerWidth;
-        zoom = Math.round(zoom * 100) / 100;
-        return {
-            zoom: zoom
-        };
-    };
-    var mediaQueryBinarySearch = function (property, unit, a, b, maxIter, epsilon) {
-        var matchMedia;
-        var head, style, div;
-        if (window.matchMedia) {
-            matchMedia = window.matchMedia;
-        } else {
-            head = document.getElementsByTagName('head')[0];
-            style = document.createElement('style');
-            head.appendChild(style);
-            div = document.createElement('div');
-            div.className = 'mediaQueryBinarySearch';
-            div.style.display = 'none';
-            document.body.appendChild(div);
-            matchMedia = function (query) {
-                style.sheet.insertRule('@media ' + query + '{.mediaQueryBinarySearch ' + '{text-decoration: underline} }', 0);
-                var matched = getComputedStyle(div, null).textDecoration == 'underline';
-                style.sheet.deleteRule(0);
-                return {matches: matched};
-            };
-        }
-        var ratio = binarySearch(a, b, maxIter);
-        if (div) {
-            head.removeChild(style);
-            document.body.removeChild(div);
-        }
-        return ratio;
-
-        function binarySearch(a, b, maxIter) {
-            var mid = (a + b) / 2;
-            if (maxIter <= 0 || b - a < epsilon) {
-                return mid;
-            }
-            var query = "(" + property + ":" + mid + unit + ")";
-            if (matchMedia(query).matches) {
-                return binarySearch(mid, b, maxIter - 1);
-            } else {
-                return binarySearch(a, mid, maxIter - 1);
-            }
-        }
-    };
-    var detectFunction = (function () {
-        var func = fallback;
-        if (!isNaN(screen.logicalXDPI) && !isNaN(screen.systemXDPI)) {
-            func = ie8;
-        }
-        else if (window.navigator.msMaxTouchPoints) {
-            func = ie10;
-        }
-        else if(!!window.chrome && !(!!window.opera || navigator.userAgent.indexOf(' Opera') >= 0)){
-            func = chrome;
-        }
-        else if(Object.prototype.toString.call(window.HTMLElement).indexOf('Constructor') > 0){
-            func = safari;
-        }
-        else if ('orientation' in window && 'webkitRequestAnimationFrame' in window) {
-            func = webkitMobile;
-        }
-        else if ('webkitRequestAnimationFrame' in window) {
-            func = webkit;
-        }
-        else if (navigator.userAgent.indexOf('Opera') >= 0) {
-            func = opera11;
-        }
-        else if (window.devicePixelRatio) {
-            func = firefox18;
-        }
-        else if (firefox4().zoom > 0.001) {
-            func = firefox4;
-        }
-        return func;
-    }());
-
-    return ({
-        zoom: function () {
-            return detectFunction().zoom;
-        }
-    });
-}));
 
 class api{
 	proxy(){
@@ -1802,24 +1647,21 @@ raylib_like_api = {
 	}
 	''',
 	'DrawSvg' : '''
-	DrawSvg (position, size, color, hide, id, idLen, viewBox, pathData, pathDataLen, zIndex, cyclic, collide)
+	DrawSvg (pos, size, color, hide, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
-		const position_ = new Float32Array(buf, position, 2 * 4);
+		const pos_ = new Float32Array(buf, pos, 2 * 4);
 		const size_ = new Float32Array(buf, size, 2 * 4);
 		const color_ = new Uint8Array(buf, color, 4);
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
-		const viewBox_ = new Uint8Array(buf, viewBox, 4);
 		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
 		var path = get_path(pathData_, pathDataLen, cyclic);
-		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + '" viewBox="' + (viewBox_[0] - 128) + ' ' + (viewBox_[1] - 128) + ' ' + (viewBox_[2] - 128) + ' ' + (viewBox_[3] - 128) + `
-		" style="overflow:hidden;top:0;right:0;bottom:0;left:0;max-width:100vw;max-height:100vh;position:absolute;z-index:` + zIndex + '" collide="' + collide + '" pos="' + position_[0] + ' ' + position_[1] + '" size="' + size_[0] + ' ' + size_[1] + `">
-    <g transform="scale(1, -1)">
-      <path id="Material" style="fill:rgb(` + color_[0] + ' ' + color_[1] + ' ' + color_[2] + `)" d="`;
+		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + `"
+			style="position:absolute;z-index:` + zIndex + '" collide="' + collide + '" x="' + pos_[0] + '" y="' + pos_[1] + '" width="' + size_[0] + '" height="' + size_[1] + '" transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + `)">
+			<path id="Material" style="fill:rgb(` + color_[0] + ' ' + color_[1] + ' ' + color_[2] + `)" d="`;
 		var suffix = `"/>
-    </g>
 </svg>`;
-		document.documentElement.innerHTML = document.documentElement.innerHTML.replace('</script>', '</script>' + prefix + path + suffix);
+		document.body.innerHTML += prefix + path + suffix;
 	}
 	''',
 	'SetSvgPath' : '''
@@ -1829,7 +1671,7 @@ raylib_like_api = {
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
 		var path = get_path(pathData_, pathDataLen, cyclic);
-		document.getElementById(id_).children[0].children[0].setAttribute('d', path);
+		document.getElementById(id_).children[0].setAttribute('d', path);
 	}
 	''',
 	'RandomizeSvg' : '''
@@ -1839,17 +1681,17 @@ raylib_like_api = {
 		var id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		const initPathData_ = new Uint8Array(buf, initPathData, initPathDataLen);
 		var offset = random_vector_2d(maxDist);
-		var path = 'M ' + (initPathData_[0] - 128 + offset[0]) + ',' + (initPathData_[1] - 128 + offset[1]) + ' ';
+		var path = 'M ' + (initPathData_[0] + offset[0]) + ',' + (initPathData_[1] + offset[1]) + ' ';
 		for (var i = 2; i < initPathDataLen; i += 2)
 		{
 			var offset = random_vector_2d(maxDist);
 			if (i - 2 % 6 == 0)
 				path += 'C ';
-			path += '' + (initPathData_[i] - 128 + offset[0]) + ',' + (initPathData_[i + 1] - 128 + offset[1]) + ' ';
+			path += '' + (initPathData_[i] + offset[0]) + ',' + (initPathData_[i + 1] + offset[1]) + ' ';
 		}
 		if (cyclic)
 			path += 'Z';
-		document.getElementById(id_).children[0].children[0].setAttribute('d', path);
+		document.getElementById(id_).children[0].setAttribute('d', path);
 	}
 	''',
 	'ClearBackground' : '''
@@ -1914,13 +1756,25 @@ raylib_like_api = {
 			else
 				lastChild += char;
 		}
-		var html = document.documentElement.innerHTML;
+		var html = document.body.innerHTML;
 		var indexOfFirstChild = html.indexOf(firstChild);
 		indexOfLastChild = html.indexOf('</svg>', indexOfFirstChild) + 6;
 		var indexOfLastChild = html.indexOf(lastChild);
 		indexOfLastChild = html.lastIndexOf('<', indexOfLastChild);
-		document.documentElement.innerHTML = html.slice(0, indexOfFirstChild) + '</g>' + html.slice(indexOfFirstChild);
-		document.documentElement.innerHTML = html.slice(0, indexOfLastChild) + '<g id="' + id_ + '">' + html.slice(indexOfLastChild);
+		document.body.innerHTML = html.slice(0, indexOfFirstChild) + '</g>' + html.slice(indexOfFirstChild);
+		document.body.innerHTML = html.slice(0, indexOfLastChild) + '<g id="' + id_ + '">' + html.slice(indexOfLastChild);
+	}
+	''',
+	'CloneElement' : '''
+	CloneElement (id, idLen, pos)
+	{
+		const buf = this.wasm.instance.exports.memory.buffer;
+		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
+		const pos_ = new Float32Array(buf, pos, 2 * 4);
+		var clone = document.getElementById(id_).cloneNode(true);
+		clone.setAttribute('x', pos_[0]);
+		clone.setAttribute('y', pos_[1]);
+		document.body.appendChild(clone);
 	}
 	''',
 }
@@ -1937,7 +1791,7 @@ def GenMiniAPI ():
 				code = sym + code[len(fname) :]
 				raylib_like_api_mini[fname] = { 'sym' : sym, 'code' : code.replace('\t','') }
 		else:
-			# hard coded syms
+			# Hard coded syms
 			sym = code.split('(')[0]
 			raylib_like_api_mini[fname] = {'sym' : sym, 'code' : code.replace('\t','') }
 	for fname in c3dom_api:
