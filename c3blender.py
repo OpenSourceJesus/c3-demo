@@ -103,13 +103,14 @@ def Build (input = './demo.c3', output = 'demo', wasm = '--wasm' in sys.argv, op
 	cmd += [mode, input, raylib]
 	print(cmd)
 	res = subprocess.check_output(cmd).decode('utf-8')
-	ofiles = []
+	oFiless = []
 	for ln in res.splitlines():
 		if ln.endswith('.o'):
-			ofiles.append(ln.strip())
-	print(ofiles)
+			oFiless.append(ln.strip())
+	print(oFiless)
 	if run and not wasm:
 		subprocess.check_call(['/tmp/' + output])
+
 	if wasm:
 		w = '/tmp/%s.wasm' % output
 		if C3_STRIP_TAIL:
@@ -270,7 +271,7 @@ def IsCircle (ob):
 		return False
 
 def GetSafeName (ob):
-	return ob.name.replace('é', 'e').lower().replace('.', '_')
+	return ob.name.replace('é', 'e').lower().replace('(', '_').replace(')', '_').replace('.', '_').replace(' ', '_')
 
 WASM_EXTERN = '''
 extern fn void html_css_string (int id, char *key, char *val) @extern("html_css_string");
@@ -281,9 +282,9 @@ extern fn float random () @extern("random");
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* pos, Vector2* size, Color* color, bool hide, char[]* id, int idLen, char[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide) @extern("DrawSvg");
-extern fn void set_svg_path (char[]* id, int idLen, char[]* pathData, int pathDataLen) @extern("SetSvgPath");
-extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, bool cyclic, float maxDist) @extern("RandomizeSvg");
+extern fn void draw_svg (Vector2* pos, Vector2* size, Color* color, bool hide, char[]* id, int idLen, char[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide) @extern("draw_svg");
+extern fn void set_svg_path (char[]* id, int idLen, char[]* pathData, int pathDataLen) @extern("set_svg_path");
+extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, bool cyclic, float maxDist) @extern("randomize_svg");
 
 extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
 extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
@@ -305,8 +306,8 @@ extern fn void html_eval (char *ptr) @extern("html_eval");
 extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
 
-extern fn void add_group (char[]* id, int idLen, char[]* firstAndLastChildIds, int firstAndLastChildIdsLen) @extern("AddGroup");
-extern fn void clone_element (char[]* id, int idLen, Vector2* pos) @extern("CloneElement");
+extern fn void add_group (char[]* id, int idLen, char[]* firstAndLastChildIds, int firstAndLastChildIdsLen) @extern("add_group");
+extern fn void clone_element (char[]* id, int idLen, Vector2* pos) @extern("clone_element");
 '''
 
 def GetScripts (ob, isAPI : bool):
@@ -390,35 +391,6 @@ def Divide (v : Vector, v2 : Vector, use2D : bool = False):
 	else:
 		return Vector(( v.x / v2.x, v.y / v2.y, v.z / v2.z ))
 
-# def QuantizeVectorComponentText (value : str, isXComponent : bool, ob, offset : Vector, foundOffset : bool):
-# 	value = float(value)
-# 	if isXComponent:
-# 		value *=  ob.scale.x
-# 	else:
-# 		value *= -ob.scale.y
-# 	value *= bpy.data.worlds[0].c3_export_scale
-# 	if foundOffset:
-# 		print(offset)
-# 		if isXComponent:
-# 			value += offset.x
-# 		else:
-# 			value += offset.y
-# 	elif isXComponent:
-# 		if 0 < value < offset.x:
-# 			offset.x = value
-# 	elif 0 < value < offset.y:
-# 		offset.y = value
-# 	return str(round(value))
-
-# def QuantizeVectorComponentText (value : str, isXComponent : bool, ob):
-# 	value = float(value)
-# 	if isXComponent:
-# 		value *=  ob.scale.x
-# 	else:
-# 		value *= ob.scale.y
-# 	value *= bpy.data.worlds[0].c3_export_scale
-# 	return str(value)
-
 def ToNormalizedPoint (minMax : [],  v : Vector):
 	return Divide(Vector(( 1, 1 )), (minMax[1] - minMax[0]), True) * (v - minMax[0])
 
@@ -455,10 +427,10 @@ setup = [ 'fn void main() @extern("main") @wasm {' ]
 draw  = []
 svgText = ''
 userWasmExtern = ''
-userJsLibAPIEnv = ''
+userJsLibAPI = ''
 svgRect = [ Vector(( float('inf'), float('inf') )), Vector(( -float('inf'), -float('inf') )) ]
 
-def ExportObject (ob):
+def ExportObject (ob, wasm = False, html = None, useHtml = False):
 	global draw
 	global setup
 	if ob.hide_get() or ob in exportedObs:
@@ -629,7 +601,7 @@ def ExportObject (ob):
 			%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr ))
 	elif ob.type == 'FONT' and wasm:
 		cscale = ob.data.size * SCALE
-		if use_html:
+		if useHtml:
 			css = 'position:absolute; left:%spx; top:%spx; font-size:%spx;' %( x + (cscale * 0.1), z - cscale, cscale )
 			div = '<div id="%s" style="%s">%s</div>' %( sname, css, ob.data.body )
 			html.append(div)
@@ -711,7 +683,7 @@ def ExportObject (ob):
 			]
 	exportedObs.append(ob)
 
-def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {}):
+def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}):
 	global head
 	global draw
 	global setup
@@ -722,10 +694,10 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	global svgRect
 	global exportedObs
 	global userWasmExtern
-	global userJsLibAPIEnv
+	global userJsLibAPI
 	exportedObs = []
 	userWasmExtern = ''
-	userJsLibAPIEnv = ''
+	userJsLibAPI = ''
 	resX = world.c3_export_res_x
 	resY = world.c3_export_res_y
 	SCALE = world.c3_export_scale
@@ -748,21 +720,21 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 		draw.append('	raylib::clear_background({ 0xFF, 0xFF, 0xFF, 0xFF });')
 	if wasm:
 		head.append(HEADER_OBJECT_WASM)
-		if world.c3_miniapi:
-			s = WASM_EXTERN
-			for fname in c3dom_api_mini:
-				key = '@extern("%s")' % fname
-				if key not in s:
-					print(s)
-					print(key)
-				assert key in s
-				s = s.replace(key, '@extern("%s")' % c3dom_api_mini[fname]['sym'])
-			for fname in raylib_like_api_mini:
-				key = '@extern("%s")' % fname
-				s = s.replace(key, '@extern("%s")' % raylib_like_api_mini[fname]['sym'])
-			head.append(s)
-		else:
-			head.append(WASM_EXTERN)
+		# if world.c3_miniapi:
+		# 	s = WASM_EXTERN
+		# 	for fName in c3dom_api_mini:
+		# 		key = '@extern("%s")' %fName
+		# 		if key not in s:
+		# 			print(s)
+		# 			print(key)
+		# 		assert key in s
+		# 		s = s.replace(key, '@extern("%s")' %c3dom_api_mini[fName]['sym'])
+		# 	for fName in raylib_like_api_mini:
+		# 		key = '@extern("%s")' %fName
+		# 		s = s.replace(key, '@extern("%s")' %raylib_like_api_mini[fName]['sym'])
+		# 	head.append(s)
+		# else:
+		head.append(WASM_EXTERN)
 		head.append(WASM_HELPERS)
 	global_v2arrays = {}
 	meshes = []
@@ -770,13 +742,13 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	datas = {}
 	prevParentName = None
 	for ob in bpy.data.objects:
-		ExportObject (ob)
+		ExportObject (ob, wasm, useHtml, html)
 	for ob in bpy.data.objects:
 		for scriptInfo in GetScripts(ob, True):
 			script = scriptInfo[0]
 			isJs = scriptInfo[1]
 			if isJs:
-				userJsLibAPIEnv += script
+				userJsLibAPI += script
 				continue
 			elif '(' not in script:
 				userWasmExtern += script
@@ -848,7 +820,7 @@ def BlenderToC3 (world, wasm = False, html = None, use_html = False, methods = {
 	if not wasm:
 		draw.append('	raylib::end_drawing();')
 	draw.append('}')
-	head.append('Object[%s] objects;' % len(meshes + curves))
+	head.append('Object[%s] objects;' %len(meshes + curves))
 	if unpackers:
 		for gkey in unpackers:
 			head += unpackers[gkey]
@@ -930,7 +902,7 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 					nn = n
 				r, g, b, a = mat.grease_pencil.fill_color
 				swidth = GetStrokeWidth(stroke)
-				datas[dname]['draw'].append({'layer' : lidx, 'index' : sidx, 'length' : nn, 'width' : swidth, 'fill' : use_fill, 'color' : [r, g, b, a]})
+				datas[dname]['draw'].append({'layer' : lidx, 'index' : sidx, 'length' : nn, 'width' : swidth, 'fill' : use_fill, 'color' : [ r, g, b, a ]})
 		head += data
 		if gquant:
 			if gquant in ('6bits', '7bits'):
@@ -939,7 +911,7 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 				head += GetDeltaUnpacker(ob, dname, gquant, SCALE, qs, offX, offY)
 	oname = sname = GetSafeName(ob)
 	if scripts:
-		draw.append('	self = objects[%s];' % obIndex)
+		draw.append('	self = objects[%s];' %obIndex)
 		props = {}
 		for prop in ob.keys():
 			if prop.startswith( ('_', 'c3_') ):
@@ -950,9 +922,9 @@ def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 		for s in scripts:
 			for prop in props:
 				if 'self.' + prop in s:
-					s = s.replace('self.' + prop, '%s_%s'%(sname,prop))
+					s = s.replace('self.' + prop, '%s_%s' %(sname,prop))
 			draw.append('\t' + s)
-		# Save object state: from stack back to heap
+		# Save object state from stack back to heap
 		draw.append('	objects[%s] = self; // %s' %(obIndex, ob.name))
 	for a in datas[dname]['draw']:
 		r, g, b, alpha = a['color']
@@ -1484,7 +1456,7 @@ c3dom_api = {
 	html_new_text(ptr, r, g, b, h, id)
 	{
 		var e = document.createElement('pre');
-		e.style = 'position:absolute;left:' + r + '; top:' + g + ; font-size:' + b;
+		e.style = 'position:absolute;left:' + r + '; top:' + g + '; font-size:' + b;
 		e.hidden = h;
 		e.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer, id);
 		document.body.append(e);
@@ -1646,8 +1618,8 @@ raylib_like_api = {
 		this.ctx.stroke()
 	}
 	''',
-	'DrawSvg' : '''
-	DrawSvg (pos, size, color, hide, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide)
+	'draw_svg' : '''
+	draw_svg (pos, size, color, hide, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const pos_ = new Float32Array(buf, pos, 2 * 4);
@@ -1656,7 +1628,7 @@ raylib_like_api = {
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
 		var path = get_path(pathData_, pathDataLen, cyclic);
-		var prefix = '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="' + id_ + `"
+		var prefix = '<svg xmlns="www.w3.org/2000/svg" version="1.1" id="' + id_ + `"
 			style="position:absolute;z-index:` + zIndex + '" collide="' + collide + '" x="' + pos_[0] + '" y="' + pos_[1] + '" width="' + size_[0] + '" height="' + size_[1] + '" transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + `)">
 			<path id="Material" style="fill:rgb(` + color_[0] + ' ' + color_[1] + ' ' + color_[2] + `)" d="`;
 		var suffix = `"/>
@@ -1664,8 +1636,8 @@ raylib_like_api = {
 		document.body.innerHTML += prefix + path + suffix;
 	}
 	''',
-	'SetSvgPath' : '''
-	SetSvgPath (id, idLen, pathData, pathDataLen, cyclic)
+	'set_svg_path' : '''
+	set_svg_path (id, idLen, pathData, pathDataLen, cyclic)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
@@ -1674,8 +1646,8 @@ raylib_like_api = {
 		document.getElementById(id_).children[0].setAttribute('d', path);
 	}
 	''',
-	'RandomizeSvg' : '''
-	RandomizeSvg (id, idLen, initPathData, initPathDataLen, cyclic, maxDist)
+	'randomize_svg' : '''
+	randomize_svg (id, idLen, initPathData, initPathDataLen, cyclic, maxDist)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		var id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
@@ -1737,8 +1709,8 @@ raylib_like_api = {
 		result[3] = 255;
 	}
 	''',
-	'AddGroup' : '''
-	AddGroup (id, idLen, firstAndLastChildIds, firstAndLastChildIdsLen)
+	'add_group' : '''
+	add_group (id, idLen, firstAndLastChildIds, firstAndLastChildIdsLen)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
@@ -1765,8 +1737,8 @@ raylib_like_api = {
 		document.body.innerHTML = html.slice(0, indexOfLastChild) + '<g id="' + id_ + '">' + html.slice(indexOfLastChild);
 	}
 	''',
-	'CloneElement' : '''
-	CloneElement (id, idLen, pos)
+	'clone_element' : '''
+	clone_element (id, idLen, pos)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
@@ -1783,34 +1755,46 @@ raylib_like_api_mini = {}
 c3dom_api_mini = {}
 def GenMiniAPI ():
 	syms = list(string.ascii_lowercase)
-	for fname in raylib_like_api:
-		code = raylib_like_api[fname].strip()
-		if code.startswith(fname):
-			if len(syms) > 0:
-				sym = syms.pop()
-				code = sym + code[len(fname) :]
-				raylib_like_api_mini[fname] = { 'sym' : sym, 'code' : code.replace('\t','') }
+	symsTier = 1
+	for fName in raylib_like_api:
+		code = raylib_like_api[fName].strip()
+		if code.startswith(fName):
+			if len(syms) == 0:
+				for char in string.ascii_lowercase:
+					sym = char
+					for i in range(symsTier):
+						sym += char
+					syms.append(sym)
+				symsTier += 1
+			sym = syms.pop()
+			code = sym + code[len(fName) :]
+			raylib_like_api_mini[fName] = { 'sym' : sym, 'code' : code.replace('\t','') }
 		else:
 			# Hard coded syms
 			sym = code.split('(')[0]
-			raylib_like_api_mini[fname] = {'sym' : sym, 'code' : code.replace('\t','') }
-	for fname in c3dom_api:
-		code = c3dom_api[fname].strip()
-		assert code.startswith(fname)
-		if len(syms) > 0:
-			sym = syms.pop()
-			code = sym + code[len(fname) :]
-			c3dom_api_mini[fname] = { 'sym' : sym, 'code' : code.replace('\t','') }
+			raylib_like_api_mini[fName] = {'sym' : sym, 'code' : code.replace('\t','') }
+	for fName in c3dom_api:
+		code = c3dom_api[fName].strip()
+		assert code.startswith(fName)
+		if len(syms) == 0:
+			for char in string.ascii_lowercase:
+				sym = char
+				for i in range(symsTier):
+					sym += char
+				syms.append(sym)
+			symsTier += 1
+		sym = syms.pop()
+		code = sym + code[len(fName) :]
+		c3dom_api_mini[fName] = { 'sym' : sym, 'code' : code.replace('\t','') }
 
 GenMiniAPI ()
 
-def GenJsAPI (world, c3, user_methods):
-	global userJsLibAPIEnv
+def GenJsAPI (world, c3, userMethods):
+	global userJsLibAPI
 	skip = []
 	if 'raylib::color_from_hsv' not in c3:
 		skip.append('ColorFromHSV')
 	if 'draw_circle_wasm(' not in c3:
-		skip.append('ColorFromHSV')
 		skip.append('DrawCircleWASM')
 	if 'raylib::draw_rectangle_v' not in c3:
 		skip.append('DrawRectangleV')
@@ -1825,52 +1809,55 @@ def GenJsAPI (world, c3, user_methods):
 	if 'raylib::get_screen_height' not in c3:
 		skip.append('GetScreenHeight')
 	if 'draw_svg' not in c3:
-		skip.append('DrawSvg')
+		skip.append('draw_svg')
 	if 'set_svg_path' not in c3:
-		skip.append('SetSvgPath')
+		skip.append('set_svg_path')
 	if 'randomize_svg' not in c3:
-		skip.append('RandomizeSvg')
+		skip.append('randomize_svg')
 	if 'add_group' not in c3:
-		skip.append('AddGroup')
+		skip.append('add_group')
+	if 'clone_element' not in c3:
+		skip.append('clone_element')
 	if world.c3_js13kb:
-		js = [ JS_LIB_API_ENV_MINI, JS_LIB_API ]
+		js = [ userJsLibAPI, JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
-		js = [ userJsLibAPIEnv, JS_LIB_API_ENV, JS_LIB_API ]
-	for fname in raylib_like_api:
-		if fname in skip:
-			print('Skipping:', fname)
-			continue
-		if world.c3_miniapi:
-			if fname in raylib_like_api_mini:
-				js.append(raylib_like_api_mini[fname]['code'])
-		else:
-			js.append(raylib_like_api[fname])
-	for fname in c3dom_api:
-		used = fname + '(' in c3
-		if fname in 'html_set_text html_add_char html_css_scale html_css_scale_y html_css_zindex html_css_string html_css_int'.split():
-			scall = 'self.%s(' % fname.split('html_')[-1]
+		js = [ userJsLibAPI, JS_LIB_API_ENV, JS_LIB_API ]
+	for fName in raylib_like_api:
+		# if fName in skip:
+		# 	print('Skipping:', fName)
+		# 	continue
+		# if world.c3_miniapi:
+		# 	if fName in raylib_like_api_mini:
+		# 		js.append(raylib_like_api_mini[fName]['code'])
+		# else:
+		js.append(raylib_like_api[fName])
+	for fName in c3dom_api:
+		print(fName)
+		used = fName + '(' in c3
+		if fName in 'html_set_text html_add_char html_css_scale html_css_scale_y html_css_zindex html_css_string html_css_int html_canvas_resize'.split():
+			scall = 'self.%s(' % fName.split('html_')[-1]
 			if scall in c3:
 				used = True
-			scall = '].%s(' % fname.split('html_')[-1]
+			scall = '].%s(' % fName.split('html_')[-1]
 			if scall in c3:
 				used = True
-		if used:
-			print('Used:', fname)
-			if world.c3_miniapi:
-				js.append(c3dom_api_mini[fname]['code'])
-			else:
-				js.append(c3dom_api[fname])
-		else:
-			print('Skipping:', fname)
-	for fname in user_methods:
-		fudge = fname.replace('(', '(_,')
+		# if used:
+		print('Used:', fName)
+		# if world.c3_miniapi:
+		# 	js.append(c3dom_api_mini[fName]['code'])
+		# else:
+		js.append(c3dom_api[fName])
+		# else:
+		# 	print('Skipping:', fName)
+	for fName in userMethods:
+		fudge = fName.replace('(', '(_,')
 		js += [
 			fudge + '{',
 				'self=this.elts[_]',
-				'this._%s;' % fname,
+				'this._%s;' % fName,
 			'}',
-			'_' + fname + '{',
-			user_methods[fname],
+			'_' + fName + '{',
+			userMethods[fName],
 			'}',
 		]
 	js.append('}')
@@ -1878,8 +1865,21 @@ def GenJsAPI (world, c3, user_methods):
 	js = '\n'.join(js)
 	if 'getColorFromMemory' in js or 'color_hex_unpacked' in js:
 		js = JS_LIB_COLOR_HELPERS + js
-	if world.c3_js13kb:
-		js = js.replace('\t','').replace('\n','')
+	if world.c3_miniapi:
+		lns = js.split('\n')
+		js = ''
+		for ln in lns:
+			indexOfComment = ln.find('//')
+			if indexOfComment != -1:
+				print(ln)
+				ln = ln[: indexOfComment]
+			js += ln
+			if ln.endswith('else'):
+				js += ' '
+		for methodName in raylib_like_api_mini:
+			if methodName != 'raylib_js_set_entry':
+				js = js.replace(methodName, raylib_like_api_mini[methodName]['sym'])
+		js = js.replace('\t','')
 		rmap = {
 			'const ': 'var ', 'entryFunction' : 'ef', 'make_environment' : 'me', 
 			'color_hex_unpacked' : 'cu', 'getColorFromMemory' : 'gm', 
@@ -1892,33 +1892,33 @@ def GenJsAPI (world, c3, user_methods):
 				js = js.replace(rep, rmap[rep])
 	return js
 
-def GenHtml (world, wasm, c3, user_html = None, background = '', user_methods = {}, debug = '--debug' in sys.argv):
+def GenHtml (world, wasm, c3, user_html = None, background = '', userMethods = {}, debug = '--debug' in sys.argv):
 	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', wasm ]
 	print(cmd)
 	subprocess.check_call(cmd)
 	
 	wa = open(wasm,'rb').read()
-	w = open(wasm+'.gz','rb').read()
+	w = open(wasm +'.gz','rb').read()
 	b = base64.b64encode(w).decode('utf-8')
-	jtmp = '/tmp/c3api.js'
-	jslib = GenJsAPI(world, c3, user_methods)
-	open(jtmp,'w').write(jslib)
-	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', jtmp ]
+	jsTmp = '/tmp/c3api.js'
+	jsLib = GenJsAPI(world, c3, userMethods)
+	open(jsTmp, 'w').write(jsLib)
+	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', jsTmp ]
 	print(cmd)
 	subprocess.check_call(cmd)
 	
-	js = open(jtmp + '.gz', 'rb').read()
-	jsb = base64.b64encode(js).decode('utf-8')
-	if '--debug' in sys.argv:
+	js = open(jsTmp + '.gz', 'rb').read()
+	jsB = base64.b64encode(js).decode('utf-8')
+	if debug:
 		background = 'red'
 	if background:
-		background = 'style="background-color:%s"' % background
+		background = 'style="background-color:%s"' %background
 	if world.c3_invalid_html:
 		o = [
 			'<canvas id=$><script>',
 			'$1="%s"' % b,
-			'$0="%s"' % jsb,
-			#JS_DECOMP.replace('\t','').replace('var ', '').replace('\n',''), # breaks invalid canvas above
+			'$0="%s"' % jsB,
+			#JS_DECOMP.replace('\t','').replace('var ', '').replace('\n',''), # Breaks invalid canvas above
 			JS_DECOMP.replace('\t','').replace('var ', ''), 
 			'</script>',
 		]
@@ -1927,10 +1927,10 @@ def GenHtml (world, wasm, c3, user_html = None, background = '', user_methods = 
 		o = [
 			'<!DOCTYPE html>',
 			'<html>',
-			'<body % sstyle="width:600px;height:300px;overflow:hidden;">' % background,
+			'<body % sstyle="width:600px;height:300px;overflow:hidden;">' %background,
 			'<canvas id="$"></canvas>',
 			'<script>', 
-			'var $0="%s"' % jsb,
+			'var $0="%s"' % jsB,
 			'var $1="%s"' % b,
 			JS_DECOMP.replace('\t',''), 
 			'</script>',
@@ -1939,23 +1939,22 @@ def GenHtml (world, wasm, c3, user_html = None, background = '', user_methods = 
 			o += user_html
 		hsize = len('\n'.join(o)) + len('</body></html>')
 	_BUILD_INFO['html-size'] = hsize
-	_BUILD_INFO['jslib-size'] = len(jslib)
+	_BUILD_INFO['jslib-size'] = len(jsLib)
 	_BUILD_INFO['jslib-gz-size'] = len(js)
 	if debug:
 		if world.c3_invalid_html:
 			o.append('</canvas>')
 		o += [
 			'<pre>',
-			'jslib bytes=%s' % len(jslib),
+			'jslib bytes=%s' % len(jsLib),
 			'jslib.gz bytes=%s' % len(js),
-			'jslib.base64 bytes=%s' % len(jsb),
+			'jslib.base64 bytes=%s' % len(jsB),
 			'wasm bytes=%s' % len(wa),
 			'gzip bytes=%s' % len(w),
 			'base64 bytes=%s' % len(b),
-			'html bytes=%s' %(hsize - (len(b) + len(jsb))),
+			'html bytes=%s' %(hsize - (len(b) + len(jsB))),
 			'total bytes=%s' % hsize,
 			'C3 optimization=%s' % WORLD.c3_export_opt,
-
 		]
 		for ob in bpy.data.objects:
 			if ob.type == 'GPENCIL':
@@ -1984,26 +1983,38 @@ def BuildWasm (world):
 	if SERVER_PROC:
 		SERVER_PROC.kill()
 	user_html = []
-	user_methods = {}
-	o = BlenderToC3(world, wasm = True, html = user_html, methods = user_methods)
-	o = '\n'.join(o)
-	#print(o)
-	tmp = '/tmp/c3blender.c3'
-	open(tmp, 'w').write(o)
+	userMethods = {}
+	o = BlenderToC3(world, wasm = True, html = user_html, methods = userMethods)
+	oStr = '\n'.join(o)
 	if world.c3_miniapi:
-		rtmp = '/tmp/miniraylib.c3'
-		raylib = open('./raylib.c3').read()
-		for fname in raylib_like_api_mini:
-			b = raylib_like_api_mini[fname]['sym']
-			raylib = raylib.replace('@extern("%s")' %fname, '@extern("%s")' % b)
-		open(rtmp,'w').write(raylib)
-		wasm = Build(input = tmp, wasm=True, opt = world.c3_export_opt, raylib = rtmp)
-	else:
-		wasm = Build(input = tmp, wasm = True, opt = world.c3_export_opt)
+		lns = oStr.split('\n')
+		oStr = ''
+		for ln in lns:
+			indexOfComment = ln.find('//')
+			if indexOfComment != -1:
+				print(ln)
+				ln = ln[: indexOfComment]
+			oStr += ln
+		for methodName in raylib_like_api_mini:
+			if methodName != 'raylib_js_set_entry':
+				oStr = oStr.replace(methodName, raylib_like_api_mini[methodName]['sym'])
+	#print(oStr)
+	tmp = '/tmp/c3blender.c3'
+	open(tmp, 'w').write(oStr)
+	# if world.c3_miniapi:
+	# 	rTmp = '/tmp/miniraylib.c3'
+	# 	raylib = open('./raylib.c3').read()
+	# 	for fName in raylib_like_api_mini:
+	# 		b = raylib_like_api_mini[fName]['sym']
+	# 		raylib = raylib.replace('@extern("%s")' %fName, '@extern("%s")' %b)
+	# 	open(rTmp,'w').write(raylib)
+	# 	wasm = Build(input = tmp, wasm = True, opt = world.c3_export_opt, raylib = rTmp)
+	# else:
+	wasm = Build(input = tmp, wasm = True, opt = world.c3_export_opt)
 	wasm = WasmOpt(wasm)
 	_BUILD_INFO['wasm'] = wasm
 	_BUILD_INFO['wasm-size'] = len(open(wasm,'rb').read())
-	html = GenHtml(world, wasm, o, user_html, user_methods = user_methods)
+	html = GenHtml(world, wasm, o, user_html, userMethods = userMethods)
 	open('/tmp/index.html', 'w').write(html)
 	if world.c3_js13kb:
 		if os.path.isfile('/usr/bin/zip'):
@@ -2024,7 +2035,7 @@ def BuildWasm (world):
 				_BUILD_INFO['zip'] = '/tmp/index.html.zip'
 		else:
 			if len(html.encode('utf-8')) > 1024 * 13:
-				raise SyntaxError('final html is over 13KB')
+				raise SyntaxError('Final HTML is over 13kb')
 	if WASM_OBJDUMP:
 		cmd = [WASM_OBJDUMP, '--syms', wasm]
 		print(cmd)
@@ -2237,7 +2248,7 @@ if __name__ == '__main__':
 		if ob.type in [ 'MESH', 'CURVE' ]:
 			if len(ob.material_slots) > 0 and ob.material_slots[0].material != None:
 				ob.material_slots[0].material.use_nodes = False
-			ob.name = ob.name.replace('é', 'e')
+			ob.name = ob.name.replace('é', 'e').replace('(', '_').replace(')', '_')
 			if ob.type == 'CURVE':
 				isRotated = False
 				spline = ob.data.splines[0]
