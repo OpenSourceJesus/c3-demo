@@ -139,7 +139,7 @@ if __name__ == '__main__':
 			if arg.endswith('.blend'):
 				cmd.append(arg)
 				break
-		cmd += [  '--python-exit-code', '1', '--python', __file__, '--python', os.path.join(_thisdir, 'blender-curve-to-svg', 'curve_to_svg.py') ]
+		cmd += [ '--python-exit-code', '1', '--python', __file__, '--python', os.path.join(_thisdir, 'blender-curve-to-svg', 'curve_to_svg.py') ]
 		exargs = []
 		for arg in sys.argv:
 			if arg.startswith('--'):
@@ -166,9 +166,6 @@ HEADER = '''
 import raylib;
 def Entry = fn void();
 extern fn void raylib_js_set_entry(Entry entry) @extern("_") @wasm;
-const Vector2 GRAVITY = {0, 1000};
-const int N = 10;
-const float COLLISION_DAMP = 1;
 
 bitstruct Vector2_4bits : ichar {
 	ichar x : 4..7;
@@ -282,7 +279,7 @@ extern fn float random () @extern("random");
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* pos, Vector2* size, Color* color, bool hide, char[]* id, int idLen, char[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide) @extern("draw_svg");
+extern fn void draw_svg (Vector2* pos, Vector2* size, Color* fillColor, bool useLine, float lineWidth, Color* lineColor, bool hide, char[]* id, int idLen, char[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide) @extern("draw_svg");
 extern fn void set_svg_path (char[]* id, int idLen, char[]* pathData, int pathDataLen) @extern("set_svg_path");
 extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, bool cyclic, float maxDist) @extern("randomize_svg");
 
@@ -307,7 +304,7 @@ extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
 
 extern fn void add_group (char[]* id, int idLen, char[]* firstAndLastChildIds, int firstAndLastChildIdsLen) @extern("add_group");
-extern fn void clone_element (char[]* id, int idLen, Vector2* pos) @extern("clone_element");
+extern fn void clone_node (char[]* id, int idLen, Vector2* pos) @extern("clone_node");
 '''
 
 def GetScripts (ob, isAPI : bool):
@@ -519,7 +516,6 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 	elif ob.type == 'CURVE':
 		curves.append(ob)
 		bpy.ops.object.select_all(action = 'DESELECT')
-		min, max = GetCurveRectMinMax(ob)
 		ob.select_set(True)
 		bpy.ops.curve.export_svg()
 		svgText = open('/tmp/Output.svg', 'r').read()
@@ -552,7 +548,7 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 				exportedObNameWithoutPeriod = exportedOb.name[: indexOfPeriod]
 			if obNameWithoutPeriod == exportedObNameWithoutPeriod:
 				idData, idDataLen = ToC3(exportedOb.name)
-				setup.append('	clone_element((char[]*) &%s, %s, &(objects[%s].pos));' %( 'ID_' + GetSafeName(exportedOb).upper(), idDataLen, idx ))
+				setup.append('	clone_node((char[]*) &%s, %s, &(objects[%s].pos));' %( 'ID_' + GetSafeName(exportedOb).upper(), idDataLen, idx ))
 				exportedObs.append(ob)
 				return
 		if len(ob.material_slots) > 0:
@@ -561,7 +557,7 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 			materialColor = DEFAULT_COLOR
 		size = max - min
 		setup.append('	objects[%s].scale = { %s, %s };' %( idx, size.x, size.y ))
-		setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
+		setup.append('	objects[%s].color = { %s, %s, %s, 0 };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
 		svgText_ = svgText_[: indexOfParentGroupContents] + group + svgText_[indexOfParentGroupEnd :]
 		pathDataIndicator = ' d="'
 		indexOfPathDataStart = svgText_.find(pathDataIndicator) + len(pathDataIndicator)
@@ -597,8 +593,14 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 		cyclic = ob.data.splines[0].use_cyclic_u
 		isCyclicStr = str(cyclic).lower()
 		collideStr = str(ob.collide).lower()
-		setup.append('	draw_svg(&(objects[%s].pos), &(objects[%s].scale), &(objects[%s].color), objects[%s].hide, (char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s, %s);'
-			%( idx, idx, idx, idx, 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr ))
+		strokeColorArg = 'null'
+		if ob.useSvgStroke:
+			strokeColorStr = '{ %s, %s, %s, 0 }' %( round(ob.svgStrokeColor[0] * 255), round(ob.svgStrokeColor[1] * 255), round(ob.svgStrokeColor[2] * 255) )
+			head.append('const Color LINE_COLOR_%s = %s;' %( sname.upper(), strokeColorStr ))
+			strokeColorArg = '(Color*) &LINE_COLOR_' + sname.upper()
+		useSvgStrokeStr = str(ob.useSvgStroke).lower()
+		setup.append('	draw_svg(&(objects[%s].pos), &(objects[%s].scale), &(objects[%s].color), %s, %s, %s, objects[%s].hide, (char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s, %s);'
+			%( idx, idx, idx, useSvgStrokeStr, ob.svgStrokeWidth, strokeColorArg, idx, 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr ))
 	elif ob.type == 'FONT' and wasm:
 		cscale = ob.data.size * SCALE
 		if useHtml:
@@ -720,20 +722,6 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 		draw.append('	raylib::clear_background({ 0xFF, 0xFF, 0xFF, 0xFF });')
 	if wasm:
 		head.append(HEADER_OBJECT_WASM)
-		# if world.c3_miniapi:
-		# 	s = WASM_EXTERN
-		# 	for fName in c3dom_api_mini:
-		# 		key = '@extern("%s")' %fName
-		# 		if key not in s:
-		# 			print(s)
-		# 			print(key)
-		# 		assert key in s
-		# 		s = s.replace(key, '@extern("%s")' %c3dom_api_mini[fName]['sym'])
-		# 	for fName in raylib_like_api_mini:
-		# 		key = '@extern("%s")' %fName
-		# 		s = s.replace(key, '@extern("%s")' %raylib_like_api_mini[fName]['sym'])
-		# 	head.append(s)
-		# else:
 		head.append(WASM_EXTERN)
 		head.append(WASM_HELPERS)
 	global_v2arrays = {}
@@ -1412,6 +1400,19 @@ function lerp (min, max, t)
 {
 	return min + t * (max - min)
 }
+function clamp (n, min, max)
+{
+    return Math.min(Math.max(n, min), max);
+}
+function inv_lerp (from, to, n)
+{
+	return (n - from) / (to - from);
+}
+function remap (inFrom, inTo, outFrom, outTo, n)
+{
+	var t = inv_lerp(inFrom, inTo, n);
+	return lerp(outFrom, outTo, t);
+}
 function scale_by_rect (pos, size, rect)
 {
     size[0] *= rect.width;
@@ -1426,6 +1427,13 @@ function overlaps (pos, size, pos2, size2)
 		|| pos[0] > pos2[0] + size2[0]
 		|| pos[1] + size[1] < pos2[1]
 		|| pos[1] > pos2[1] + size2[1])
+}
+function clone_node (id, pos)
+{
+	var clone = document.getElementById(id).cloneNode(true);
+	clone.setAttribute('x', pos[0]);
+	clone.setAttribute('y', pos[1]);
+	document.body.appendChild(clone);
 }
 
 class api{
@@ -1619,18 +1627,22 @@ raylib_like_api = {
 	}
 	''',
 	'draw_svg' : '''
-	draw_svg (pos, size, color, hide, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide)
+	draw_svg (pos, size, fillColor, useLine, lineWidth, lineColor, hide, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const pos_ = new Float32Array(buf, pos, 2 * 4);
 		const size_ = new Float32Array(buf, size, 2 * 4);
-		const color_ = new Uint8Array(buf, color, 4);
+		const fillColor_ = new Uint8Array(buf, fillColor, 4);
+		const lineColor_ = new Uint8Array(buf, lineColor, 4);
+		var lineColorTxt = 'transparent';
+		if (useLine)
+			lineColorTxt = 'rgb(' + lineColor_[0] + ' ' + lineColor_[1] + ' ' + lineColor_[2] + ')';
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
 		var path = get_path(pathData_, pathDataLen, cyclic);
-		var prefix = '<svg xmlns="www.w3.org/2000/svg" version="1.1" id="' + id_ + `"
-			style="position:absolute;z-index:` + zIndex + '" collide="' + collide + '" x="' + pos_[0] + '" y="' + pos_[1] + '" width="' + size_[0] + '" height="' + size_[1] + '" transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + `)">
-			<path id="Material" style="fill:rgb(` + color_[0] + ' ' + color_[1] + ' ' + color_[2] + `)" d="`;
+		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + `"
+			style="position:absolute;z-index:` + zIndex + '"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + `)">
+			<path id="Material" style="fill:rgb(` + fillColor_[0] + ' ' + fillColor_[1] + ' ' + fillColor_[2] + ');stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
 		var suffix = `"/>
 </svg>`;
 		document.body.innerHTML += prefix + path + suffix;
@@ -1737,16 +1749,16 @@ raylib_like_api = {
 		document.body.innerHTML = html.slice(0, indexOfLastChild) + '<g id="' + id_ + '">' + html.slice(indexOfLastChild);
 	}
 	''',
-	'clone_element' : '''
-	clone_element (id, idLen, pos)
+	'clone_node' : '''
+	clone_node (id, idLen, pos)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
-		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
+		if (idLen > 0)
+			var id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
+		else
+			var id_ = id;
 		const pos_ = new Float32Array(buf, pos, 2 * 4);
-		var clone = document.getElementById(id_).cloneNode(true);
-		clone.setAttribute('x', pos_[0]);
-		clone.setAttribute('y', pos_[1]);
-		document.body.appendChild(clone);
+		clone_node (id_, pos_);
 	}
 	''',
 }
@@ -1816,8 +1828,8 @@ def GenJsAPI (world, c3, userMethods):
 		skip.append('randomize_svg')
 	if 'add_group' not in c3:
 		skip.append('add_group')
-	if 'clone_element' not in c3:
-		skip.append('clone_element')
+	if 'clone_node' not in c3:
+		skip.append('clone_node')
 	if world.c3_js13kb:
 		js = [ userJsLibAPI, JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
@@ -1826,9 +1838,6 @@ def GenJsAPI (world, c3, userMethods):
 		# if fName in skip:
 		# 	print('Skipping:', fName)
 		# 	continue
-		# if world.c3_miniapi:
-		# 	if fName in raylib_like_api_mini:
-		# 		js.append(raylib_like_api_mini[fName]['code'])
 		# else:
 		js.append(raylib_like_api[fName])
 	for fName in c3dom_api:
@@ -1843,8 +1852,6 @@ def GenJsAPI (world, c3, userMethods):
 				used = True
 		# if used:
 		print('Used:', fName)
-		# if world.c3_miniapi:
-		# 	js.append(c3dom_api_mini[fName]['code'])
 		# else:
 		js.append(c3dom_api[fName])
 		# else:
@@ -1871,7 +1878,6 @@ def GenJsAPI (world, c3, userMethods):
 		for ln in lns:
 			indexOfComment = ln.find('//')
 			if indexOfComment != -1:
-				print(ln)
 				ln = ln[: indexOfComment]
 			js += ln
 			if ln.endswith('else'):
@@ -1879,7 +1885,6 @@ def GenJsAPI (world, c3, userMethods):
 		for methodName in raylib_like_api_mini:
 			if methodName != 'raylib_js_set_entry':
 				js = js.replace(methodName, raylib_like_api_mini[methodName]['sym'])
-		js = js.replace('\t','')
 		rmap = {
 			'const ': 'var ', 'entryFunction' : 'ef', 'make_environment' : 'me', 
 			'color_hex_unpacked' : 'cu', 'getColorFromMemory' : 'gm', 
@@ -1890,6 +1895,7 @@ def GenJsAPI (world, c3, userMethods):
 		for rep in rmap:
 			if rep in js:
 				js = js.replace(rep, rmap[rep])
+		js = js.replace('\t', '').replace('     ', ' ').replace('    ', ' ').replace('   ', ' ').replace('  ', ' ')
 	return js
 
 def GenHtml (world, wasm, c3, user_html = None, background = '', userMethods = {}, debug = '--debug' in sys.argv):
@@ -1992,24 +1998,15 @@ def BuildWasm (world):
 		for ln in lns:
 			indexOfComment = ln.find('//')
 			if indexOfComment != -1:
-				print(ln)
 				ln = ln[: indexOfComment]
 			oStr += ln
 		for methodName in raylib_like_api_mini:
 			if methodName != 'raylib_js_set_entry':
 				oStr = oStr.replace(methodName, raylib_like_api_mini[methodName]['sym'])
+		oStr = oStr.replace('\t', '').replace('  ', '')
 	#print(oStr)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(oStr)
-	# if world.c3_miniapi:
-	# 	rTmp = '/tmp/miniraylib.c3'
-	# 	raylib = open('./raylib.c3').read()
-	# 	for fName in raylib_like_api_mini:
-	# 		b = raylib_like_api_mini[fName]['sym']
-	# 		raylib = raylib.replace('@extern("%s")' %fName, '@extern("%s")' %b)
-	# 	open(rTmp,'w').write(raylib)
-	# 	wasm = Build(input = tmp, wasm = True, opt = world.c3_export_opt, raylib = rTmp)
-	# else:
 	wasm = Build(input = tmp, wasm = True, opt = world.c3_export_opt)
 	wasm = WasmOpt(wasm)
 	_BUILD_INFO['wasm'] = wasm
@@ -2018,7 +2015,7 @@ def BuildWasm (world):
 	open('/tmp/index.html', 'w').write(html)
 	if world.c3_js13kb:
 		if os.path.isfile('/usr/bin/zip'):
-			cmd = ['zip', '-9', 'index.html.zip', 'index.html']
+			cmd = [ 'zip', '-9', 'index.html.zip', 'index.html' ]
 			print(cmd)
 			subprocess.check_call(cmd, cwd='/tmp')
 
@@ -2037,7 +2034,7 @@ def BuildWasm (world):
 			if len(html.encode('utf-8')) > 1024 * 13:
 				raise SyntaxError('Final HTML is over 13kb')
 	if WASM_OBJDUMP:
-		cmd = [WASM_OBJDUMP, '--syms', wasm]
+		cmd = [ WASM_OBJDUMP, '--syms', wasm ]
 		print(cmd)
 		subprocess.check_call(cmd)
 
@@ -2061,6 +2058,7 @@ def Update ():
 		if len(ob.material_slots) == 0 or ob.material_slots[0].material == None:
 			continue
 		mat = ob.material_slots[0].material
+		mat.use_nodes = False
 		indexOfPeriod = mat.name.find('.')
 		if indexOfPeriod != -1:
 			origName = mat.name[: indexOfPeriod]
@@ -2099,8 +2097,8 @@ bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name = 'Offset Y', de
 
 bpy.types.World.c3_export_html = bpy.props.StringProperty(name = 'C3 export (.html)')
 bpy.types.World.c3_export_zip = bpy.props.StringProperty(name = 'C3 export (.zip)')
-bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name = 'C3 minifiy js/wasm api calls')
-bpy.types.World.c3_js13kb = bpy.props.BoolProperty(name = 'js13k: error on export if output is over 13KB')
+bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name = 'Minifiy')
+bpy.types.World.c3_js13kb = bpy.props.BoolProperty(name = 'js13k: Error on export if output is over 13KB')
 bpy.types.World.c3_invalid_html = bpy.props.BoolProperty(name = 'Save space with invalid html wrapper')
 
 bpy.types.World.c3_export_opt = bpy.props.EnumProperty(
@@ -2132,6 +2130,9 @@ bpy.types.GreasePencilv3.c3_grease_quantize = bpy.props.EnumProperty(
 
 bpy.types.Object.hide = bpy.props.BoolProperty(name = 'Hide')
 bpy.types.Object.collide = bpy.props.BoolProperty(name = 'Collide')
+bpy.types.Object.useSvgStroke = bpy.props.BoolProperty(name = 'Use svg stroke')
+bpy.types.Object.svgStrokeWidth = bpy.props.FloatProperty(name='Svg stroke width', default = 0)
+bpy.types.Object.svgStrokeColor = bpy.props.FloatVectorProperty(name='Svg stroke color', subtype = 'COLOR', default = [0, 0, 0])
 
 for i in range(MAX_SCRIPTS_PER_OBJECT):
 	setattr(
@@ -2182,6 +2183,9 @@ class ScriptsPanel (bpy.types.Panel):
 			self.layout.prop(ob.data, 'c3_grease_quantize')
 		self.layout.prop(ob, 'hide')
 		self.layout.prop(ob, 'collide')
+		self.layout.prop(ob, 'useSvgStroke')
+		self.layout.prop(ob, 'svgStrokeWidth')
+		self.layout.prop(ob, 'svgStrokeColor')
 		self.layout.label(text = 'Scripts')
 		foundUnassignedScript = False
 		for i in range(MAX_SCRIPTS_PER_OBJECT):
@@ -2246,39 +2250,37 @@ if __name__ == '__main__':
 	bpy.app.timers.register(Update)
 	for ob in bpy.data.objects:
 		if ob.type in [ 'MESH', 'CURVE' ]:
-			if len(ob.material_slots) > 0 and ob.material_slots[0].material != None:
-				ob.material_slots[0].material.use_nodes = False
 			ob.name = ob.name.replace('é', 'e').replace('(', '_').replace(')', '_')
-			if ob.type == 'CURVE':
-				isRotated = False
-				spline = ob.data.splines[0]
-				points = spline.bezier_points
-				if ob.rotation_mode == 'QUATERNION':
-					prevRot = ob.rotation_quaternion
-					if prevRot != Quaternion((1, 0, 0, 0)):
-						isRotated = True
-						ob.rotation_quaternion.identity()
-				else:
-					prevRot = ob.rotation_euler
-					if prevRot != Euler((0, 0, 0)):
-						isRotated = True
-						ob.rotation_euler.zero()
-				if isRotated:
-					for point in points:
-						point_ = point.co
-						point_.rotate(prevRot)
-						leftHandle = point.handle_left
-						leftHandle.rotate(prevRot)
-						rightHandle = point.handle_right
-						rightHandle.rotate(prevRot)
-				if ob.scale != Vector(( 1, 1, 1 )):
-					prevScale = ob.scale
-					prevMin, prevMax = GetCurveRectMinMax(ob)
-					ob.scale = Vector(( 1, 1, 1 ))
-					for point in points:
-						point.co *= prevScale
-					_min, _max = GetCurveRectMinMax(ob)
-					ob.location += ToVector3(prevMin - _min)
+			# if ob.type == 'CURVE':
+			# 	isRotated = False
+			# 	spline = ob.data.splines[0]
+			# 	points = spline.bezier_points
+			# 	if ob.rotation_mode == 'QUATERNION':
+			# 		prevRot = ob.rotation_quaternion
+			# 		if prevRot != Quaternion((1, 0, 0, 0)):
+			# 			isRotated = True
+			# 			ob.rotation_quaternion.identity()
+			# 	else:
+			# 		prevRot = ob.rotation_euler
+			# 		if prevRot != Euler((0, 0, 0)):
+			# 			isRotated = True
+			# 			ob.rotation_euler.zero()
+			# 	if isRotated:
+			# 		for point in points:
+			# 			point_ = point.co
+			# 			point_.rotate(prevRot)
+			# 			leftHandle = point.handle_left
+			# 			leftHandle.rotate(prevRot)
+			# 			rightHandle = point.handle_right
+			# 			rightHandle.rotate(prevRot)
+				# if ob.scale != Vector(( 1, 1, 1 )):
+				# 	prevScale = ob.scale
+				# 	prevMin, prevMax = GetCurveRectMinMax(ob)
+				# 	ob.scale = Vector(( 1, 1, 1 ))
+				# 	for point in points:
+				# 		point.co *= prevScale
+				# 	_min, _max = GetCurveRectMinMax(ob)
+				# 	ob.location += ToVector3(prevMin - _min)
 	if '--test' in sys.argv or test:
 		import c3blendgen
 		if test:
