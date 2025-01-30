@@ -52,7 +52,7 @@ assert os.path.isfile(C3)
 EMSDK = os.path.join(_thisdir, 'emsdk')
 if '--install-wasm' in sys.argv and not os.path.isdir(EMSDK):
 	cmd = [
-		'git','clone','--depth','1',
+		'git','copy','--depth','1',
 		'https://github.com/emscripten-core/emsdk.git',
 	]
 	print(cmd)
@@ -279,7 +279,7 @@ extern fn float random () @extern("random");
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* pos, Vector2* size, Color* fillColor, bool useLine, float lineWidth, Color* lineColor, bool hide, char[]* id, int idLen, char[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide) @extern("draw_svg");
+extern fn void draw_svg (Vector2* pos, Vector2* size, Color* fillColor, bool useLine, float lineWidth, Color* lineColor, bool hide, char[]* id, int idLen, usz[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide, int quantizeType) @extern("draw_svg");
 extern fn void set_svg_path (char[]* id, int idLen, char[]* pathData, int pathDataLen) @extern("set_svg_path");
 extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, bool cyclic, float maxDist) @extern("randomize_svg");
 
@@ -304,7 +304,7 @@ extern fn char wasm_memory (int idx) @extern("wasm_memory");
 extern fn int wasm_size () @extern("wasm_size");
 
 extern fn void add_group (char[]* id, int idLen, char[]* firstAndLastChildIds, int firstAndLastChildIdsLen) @extern("add_group");
-extern fn void clone_node (char[]* id, int idLen, Vector2* pos) @extern("clone_node");
+extern fn void copy_node (char[]* id, int idLen, Vector2* pos) @extern("copy_node");
 '''
 
 def GetScripts (ob, isAPI : bool):
@@ -414,6 +414,12 @@ def GetCurveRectMinMax (ob):
 	_max = Vector(( box[2], box[3] ))
 	return _min, _max
 
+def IsInAnyElement (o, arr : list):
+	for elmt in arr:
+		if o in elmt:
+			return True
+	return False
+
 DEFAULT_COLOR = [ 0.5, 0.5, 0.5, 1 ]
 exportedObs = []
 meshes = []
@@ -510,9 +516,9 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 			sx, sy, sz = ob.scale
 			setup.append('	objects[%s].scale = { %s, %s };' %( idx, sx, sz ))
 		if wasm:
-			GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, idx)
+			GreaseToC3Wasm (ob, datas, head, draw_, setup_, scripts, idx)
 		else:
-			GreaseToC3Raylib (ob, datas, head, draw, setup)
+			GreaseToC3Raylib (ob, datas, head, draw_, setup_)
 	elif ob.type == 'CURVE':
 		curves.append(ob)
 		bpy.ops.object.select_all(action = 'DESELECT')
@@ -548,7 +554,7 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 				exportedObNameWithoutPeriod = exportedOb.name[: indexOfPeriod]
 			if obNameWithoutPeriod == exportedObNameWithoutPeriod:
 				idData, idDataLen = ToC3(exportedOb.name)
-				setup.append('	clone_node((char[]*) &%s, %s, &(objects[%s].pos));' %( 'ID_' + GetSafeName(exportedOb).upper(), idDataLen, idx ))
+				setup.append('	copy_node((char[]*) &%s, %s, &(objects[%s].pos));' %( 'ID_' + GetSafeName(exportedOb).upper(), idDataLen, idx ))
 				exportedObs.append(ob)
 				return
 		if len(ob.material_slots) > 0:
@@ -587,7 +593,14 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 		for i, pathValue in enumerate(pathData_):
 			pathData_[i] = int(pathValue + offset[i % 2])
 		pathData_ = '{' + str(pathData_)[1 : -1] + '}'
-		head.append('const char[%s] PATH_DATA_%s = %s;' %( pathDataLen, sname.upper(), pathData_ ))
+		for i, quantizeTypeEnumItem in enumerate(QUANTIZE_TYPES_ENUM_ITEMS):
+			if quantizeTypeEnumItem[0] == ob.quantizeType:
+				quantizeType = i
+				break
+		pathDataType = 'char'
+		if quantizeType == 1:
+			pathDataType = 'ushort'
+		head.append('const %s[%s] PATH_DATA_%s = %s;' %( pathDataType, pathDataLen, sname.upper(), pathData_ ))
 		idData, idDataLen = ToC3(ob.name)
 		head.append('const char[%s] ID_%s = %s;' %( idDataLen, sname.upper(), idData ))
 		cyclic = ob.data.splines[0].use_cyclic_u
@@ -599,8 +612,8 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 			head.append('const Color LINE_COLOR_%s = %s;' %( sname.upper(), strokeColorStr ))
 			strokeColorArg = '(Color*) &LINE_COLOR_' + sname.upper()
 		useSvgStrokeStr = str(ob.useSvgStroke).lower()
-		setup.append('	draw_svg(&(objects[%s].pos), &(objects[%s].scale), &(objects[%s].color), %s, %s, %s, objects[%s].hide, (char[]*) &%s, %s, (char[]*) &%s, %s, %s, %s, %s);'
-			%( idx, idx, idx, useSvgStrokeStr, ob.svgStrokeWidth, strokeColorArg, idx, 'ID_' + sname.upper(), idDataLen, 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr ))
+		setup.append('	draw_svg(&(objects[%s].pos), &(objects[%s].scale), &(objects[%s].color), %s, %s, %s, objects[%s].hide, (char[]*) &%s, %s, (%s[]*) &%s, %s, %s, %s, %s, %s);'
+			%( idx, idx, idx, useSvgStrokeStr, ob.svgStrokeWidth, strokeColorArg, idx, 'ID_' + sname.upper(), idDataLen, 'usz', 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr, quantizeType ))
 	elif ob.type == 'FONT' and wasm:
 		cscale = ob.data.size * SCALE
 		if useHtml:
@@ -818,7 +831,7 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 		print('total-points:', datas[dname]['total-points'])
 	return head + setup + drawHeader + draw
 
-def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
+def GreaseToC3Wasm (ob, datas, head, draw_, setup_, scripts, obIndex):
 	SCALE = WORLD.c3_export_scale
 	offX = WORLD.c3_export_offset_x
 	offY = WORLD.c3_export_offset_y
@@ -981,7 +994,7 @@ def GetDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
 		'}'
 	]
 
-def GreaseToC3Raylib (ob, datas, head, draw, setup):
+def GreaseToC3Raylib (ob, datas, head, draw_, setup_):
 	SCALE = WORLD.c3_export_scale
 	offX = WORLD.c3_export_offset_x
 	offY = WORLD.c3_export_offset_y
@@ -1428,12 +1441,26 @@ function overlaps (pos, size, pos2, size2)
 		|| pos[1] + size[1] < pos2[1]
 		|| pos[1] > pos2[1] + size2[1])
 }
-function clone_node (id, pos)
+function copy_node (id, pos)
 {
-	var clone = document.getElementById(id).cloneNode(true);
-	clone.setAttribute('x', pos[0]);
-	clone.setAttribute('y', pos[1]);
-	document.body.appendChild(clone);
+	var copy = document.getElementById(id).cloneNode(true);
+	copy.setAttribute('x', pos[0]);
+	copy.setAttribute('y', pos[1]);
+	document.body.appendChild(copy);
+	return copy;
+}
+function rotate_2d (v, pivot, deg)
+{
+	var x = v[0] - pivot[0];
+	var y = v[1] - pivot[1];
+	var mag = Math.sqrt(x * x + y * y);
+	var ang = Math.atan2(y, x);
+	ang += deg / 180 / Math.PI;
+	return [pivot[0] + Math.cos(ang) * mag,pivot[1] + Math.sin(ang) * mag];
+}
+function random (min, max)
+{
+	return Math.random() * (max - min) + min;
 }
 
 class api{
@@ -1627,7 +1654,7 @@ raylib_like_api = {
 	}
 	''',
 	'draw_svg' : '''
-	draw_svg (pos, size, fillColor, useLine, lineWidth, lineColor, hide, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide)
+	draw_svg (pos, size, fillColor, useLine, lineWidth, lineColor, hide, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide, quantizeType)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const pos_ = new Float32Array(buf, pos, 2 * 4);
@@ -1638,12 +1665,19 @@ raylib_like_api = {
 		if (useLine)
 			lineColorTxt = 'rgb(' + lineColor_[0] + ' ' + lineColor_[1] + ' ' + lineColor_[2] + ')';
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
-		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
+		if (quantizeType == 0)
+			var pathData_ = new Uint8Array(buf, pathData, pathDataLen);
+		else if (quantizeType == 1)
+			var pathData_ = new Uint16Array(buf, pathData, pathDataLen);
+		else if (quantizeType == 2)
+			var pathData_ = new Uint32Array(buf, pathData, pathDataLen);
+		else
+			var pathData_ = new Uint64Array(buf, pathData, pathDataLen);
 		var path = get_path(pathData_, pathDataLen, cyclic);
 		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + `"
 			style="position:absolute;z-index:` + zIndex + '"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + `)">
-			<path id="Material" style="fill:rgb(` + fillColor_[0] + ' ' + fillColor_[1] + ' ' + fillColor_[2] + ');stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
-		var suffix = `"/>
+			<g id="` + id_ + 'g"><path id="Material" style="fill:rgb(' + fillColor_[0] + ' ' + fillColor_[1] + ' ' + fillColor_[2] + ');stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
+		var suffix = `"/></g>
 </svg>`;
 		document.body.innerHTML += prefix + path + suffix;
 	}
@@ -1729,13 +1763,13 @@ raylib_like_api = {
 		const firstAndLastChildIds_ = new TextDecoder().decode(new Uint8Array(buf, firstAndLastChildIds, firstAndLastChildIdsLen));
 		var firstChild = '';
 		var lastChild = '';
-		var foundFirstChild = '';
+		var foundLastChild = '';
 		for (var i = 0; i < firstAndLastChildIdsLen; i ++)
 		{
 			var char = firstAndLastChildIds_[i];
 			if (char == ',')
-				foundFirstChild = true;
-			else if (foundFirstChild)
+				foundLastChild = true;
+			else if (foundLastChild)
 				firstChild += char;
 			else
 				lastChild += char;
@@ -1749,8 +1783,8 @@ raylib_like_api = {
 		document.body.innerHTML = html.slice(0, indexOfLastChild) + '<g id="' + id_ + '">' + html.slice(indexOfLastChild);
 	}
 	''',
-	'clone_node' : '''
-	clone_node (id, idLen, pos)
+	'copy_node' : '''
+	copy_node (id, idLen, pos)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		if (idLen > 0)
@@ -1758,7 +1792,7 @@ raylib_like_api = {
 		else
 			var id_ = id;
 		const pos_ = new Float32Array(buf, pos, 2 * 4);
-		clone_node (id_, pos_);
+		copy_node (id_, pos_);
 	}
 	''',
 }
@@ -1802,44 +1836,70 @@ def GenMiniAPI ():
 GenMiniAPI ()
 
 def GenJsAPI (world, c3, userMethods):
+	global draw
+	global setup
 	global userJsLibAPI
+	draw_ = '\n'.join(draw)
+	setup_ = '\n'.join(setup)
 	skip = []
-	if 'raylib::color_from_hsv' not in c3:
+	if not IsInAnyElement('raylib::color_from_hsv', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('ColorFromHSV')
-	if 'draw_circle_wasm(' not in c3:
+	if not IsInAnyElement('draw_circle_wasm', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('DrawCircleWASM')
-	if 'raylib::draw_rectangle_v' not in c3:
+	if not IsInAnyElement('raylib::draw_rectangle_v', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('DrawRectangleV')
-	if 'raylib::clear_background' not in c3:
+	if not IsInAnyElement('raylib::clear_background', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('ClearBackground')
-	if 'raylib::get_random_value' not in c3:
+	if not IsInAnyElement('raylib::get_random_value', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('GetRandomValue')
-	if 'draw_spline_wasm' not in c3:
+	if not IsInAnyElement('draw_spline_wasm', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('DrawSplineLinearWASM')
-	if 'raylib::get_screen_width' not in c3:
+	if not IsInAnyElement('raylib::get_screen_width', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('GetScreenWidth')
-	if 'raylib::get_screen_height' not in c3:
+	if not IsInAnyElement('raylib::get_screen_height', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('GetScreenHeight')
-	if 'draw_svg' not in c3:
+	if not IsInAnyElement('draw_svg', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('draw_svg')
-	if 'set_svg_path' not in c3:
+	if not IsInAnyElement('set_svg_path', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('set_svg_path')
-	if 'randomize_svg' not in c3:
+	if not IsInAnyElement('randomize_svg', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('randomize_svg')
-	if 'add_group' not in c3:
+	if not IsInAnyElement('add_group', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('add_group')
-	if 'clone_node' not in c3:
-		skip.append('clone_node')
+	if not IsInAnyElement('copy_node', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('copy_node')
+	if not IsInAnyElement('rotate_2d', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('rotate_2d')
+	if not IsInAnyElement('scale_by_rect', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('scale_by_rect')
+	if not IsInAnyElement('clamp', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('clamp')
+	if not IsInAnyElement('get_pos_and_size', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('get_pos_and_size')
+	if not IsInAnyElement('lerp', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('lerp')
+	if not IsInAnyElement('inv_lerp', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('lerp')
+	if not IsInAnyElement('remap', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('remap')
+	if not IsInAnyElement('get_path', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('get_path')
+	if not IsInAnyElement('random_vector_2d', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('random_vector_2d')
+	if not IsInAnyElement('overlaps', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('overlaps')
+	if not IsInAnyElement('random', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('random')
 	if world.c3_js13kb:
 		js = [ userJsLibAPI, JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
 		js = [ userJsLibAPI, JS_LIB_API_ENV, JS_LIB_API ]
 	for fName in raylib_like_api:
-		# if fName in skip:
-		# 	print('Skipping:', fName)
-		# 	continue
-		# else:
-		js.append(raylib_like_api[fName])
+		if fName in skip:
+			print('Skipping:', fName)
+			continue
+		else:
+			js.append(raylib_like_api[fName])
 	for fName in c3dom_api:
 		print(fName)
 		used = fName + '(' in c3
@@ -1850,12 +1910,11 @@ def GenJsAPI (world, c3, userMethods):
 			scall = '].%s(' % fName.split('html_')[-1]
 			if scall in c3:
 				used = True
-		# if used:
-		print('Used:', fName)
-		# else:
-		js.append(c3dom_api[fName])
-		# else:
-		# 	print('Skipping:', fName)
+		if used:
+			print('Used:', fName)
+			js.append(c3dom_api[fName])
+		else:
+			print('Skipping:', fName)
 	for fName in userMethods:
 		fudge = fName.replace('(', '(_,')
 		js += [
@@ -1873,15 +1932,6 @@ def GenJsAPI (world, c3, userMethods):
 	if 'getColorFromMemory' in js or 'color_hex_unpacked' in js:
 		js = JS_LIB_COLOR_HELPERS + js
 	if world.c3_miniapi:
-		lns = js.split('\n')
-		js = ''
-		for ln in lns:
-			indexOfComment = ln.find('//')
-			if indexOfComment != -1:
-				ln = ln[: indexOfComment]
-			js += ln
-			if ln.endswith('else'):
-				js += ' '
 		for methodName in raylib_like_api_mini:
 			if methodName != 'raylib_js_set_entry':
 				js = js.replace(methodName, raylib_like_api_mini[methodName]['sym'])
@@ -1895,10 +1945,9 @@ def GenJsAPI (world, c3, userMethods):
 		for rep in rmap:
 			if rep in js:
 				js = js.replace(rep, rmap[rep])
-		js = js.replace('\t', '').replace('     ', ' ').replace('    ', ' ').replace('   ', ' ').replace('  ', ' ')
 	return js
 
-def GenHtml (world, wasm, c3, user_html = None, background = '', userMethods = {}, debug = '--debug' in sys.argv):
+def GenHtml (world, wasm, c3, userHTML = None, background = '', userMethods = {}, debug = '--debug' in sys.argv):
 	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', wasm ]
 	print(cmd)
 	subprocess.check_call(cmd)
@@ -1909,6 +1958,9 @@ def GenHtml (world, wasm, c3, user_html = None, background = '', userMethods = {
 	jsTmp = '/tmp/c3api.js'
 	jsLib = GenJsAPI(world, c3, userMethods)
 	open(jsTmp, 'w').write(jsLib)
+	if world.c3_miniapi:
+		jsLib = subprocess.run(('uglifyjs -m -- ' + jsTmp).split(), capture_output = True).stdout
+		open(jsTmp, 'wb').write(jsLib)
 	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', jsTmp ]
 	print(cmd)
 	subprocess.check_call(cmd)
@@ -1941,8 +1993,8 @@ def GenHtml (world, wasm, c3, user_html = None, background = '', userMethods = {
 			JS_DECOMP.replace('\t',''), 
 			'</script>',
 		]
-		if user_html:
-			o += user_html
+		if userHTML:
+			o += userHTML
 		hsize = len('\n'.join(o)) + len('</body></html>')
 	_BUILD_INFO['html-size'] = hsize
 	_BUILD_INFO['jslib-size'] = len(jsLib)
@@ -1988,9 +2040,9 @@ def BuildWasm (world):
 	WORLD = world
 	if SERVER_PROC:
 		SERVER_PROC.kill()
-	user_html = []
+	userHTML = []
 	userMethods = {}
-	o = BlenderToC3(world, wasm = True, html = user_html, methods = userMethods)
+	o = BlenderToC3(world, wasm = True, html = userHTML, methods = userMethods)
 	oStr = '\n'.join(o)
 	if world.c3_miniapi:
 		lns = oStr.split('\n')
@@ -2003,7 +2055,7 @@ def BuildWasm (world):
 		for methodName in raylib_like_api_mini:
 			if methodName != 'raylib_js_set_entry':
 				oStr = oStr.replace(methodName, raylib_like_api_mini[methodName]['sym'])
-		oStr = oStr.replace('\t', '').replace('  ', '')
+		oStr = oStr.replace('\t', '').replace('  ', '').replace(', ', ',').replace(' (', '(').replace(' {', '{').replace('{ ', '{').replace(' }', '}').replace(' =', '=').replace('= ', '=').replace(' : ', ':').replace(' + ', '+').replace(' / ', '/').replace('] ', ']').replace(' *', '*').replace('* ', '*')
 	#print(oStr)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(oStr)
@@ -2011,7 +2063,7 @@ def BuildWasm (world):
 	wasm = WasmOpt(wasm)
 	_BUILD_INFO['wasm'] = wasm
 	_BUILD_INFO['wasm-size'] = len(open(wasm,'rb').read())
-	html = GenHtml(world, wasm, o, user_html, userMethods = userMethods)
+	html = GenHtml(world, wasm, oStr, userHTML, userMethods = userMethods)
 	open('/tmp/index.html', 'w').write(html)
 	if world.c3_js13kb:
 		if os.path.isfile('/usr/bin/zip'):
@@ -2130,6 +2182,14 @@ bpy.types.GreasePencilv3.c3_grease_quantize = bpy.props.EnumProperty(
 
 bpy.types.Object.hide = bpy.props.BoolProperty(name = 'Hide')
 bpy.types.Object.collide = bpy.props.BoolProperty(name = 'Collide')
+QUANTIZE_TYPES_ENUM_ITEMS = [ ('UInt8', 'UInt8', ''),
+	('UInt16', 'UInt16', ''),
+	('UInt32', 'UInt32', '') ]
+bpy.types.Object.quantizeType = bpy.props.EnumProperty(
+	name = 'Svg quantize type',
+	description = '',
+	items = QUANTIZE_TYPES_ENUM_ITEMS
+)
 bpy.types.Object.useSvgStroke = bpy.props.BoolProperty(name = 'Use svg stroke')
 bpy.types.Object.svgStrokeWidth = bpy.props.FloatProperty(name='Svg stroke width', default = 0)
 bpy.types.Object.svgStrokeColor = bpy.props.FloatVectorProperty(name='Svg stroke color', subtype = 'COLOR', default = [0, 0, 0])
@@ -2183,6 +2243,7 @@ class ScriptsPanel (bpy.types.Panel):
 			self.layout.prop(ob.data, 'c3_grease_quantize')
 		self.layout.prop(ob, 'hide')
 		self.layout.prop(ob, 'collide')
+		self.layout.prop(ob, 'quantizeType')
 		self.layout.prop(ob, 'useSvgStroke')
 		self.layout.prop(ob, 'svgStrokeWidth')
 		self.layout.prop(ob, 'svgStrokeColor')
