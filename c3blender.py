@@ -2055,7 +2055,7 @@ def BuildWasm (world):
 		for methodName in raylib_like_api_mini:
 			if methodName != 'raylib_js_set_entry':
 				oStr = oStr.replace(methodName, raylib_like_api_mini[methodName]['sym'])
-		oStr = oStr.replace('\t', '').replace('  ', '').replace(', ', ',').replace(' (', '(').replace(' {', '{').replace('{ ', '{').replace(' }', '}').replace(' =', '=').replace('= ', '=').replace(' : ', ':').replace(' + ', '+').replace(' / ', '/').replace('] ', ']').replace(' *', '*').replace('* ', '*')
+		oStr = oStr.replace('\t', '').replace('  ', '').replace(', ', ',').replace(' (', '(').replace(' {', '{').replace('{ ', '{').replace(' }', '}').replace(' =', '=').replace('= ', '=').replace(' : ', ':').replace(' + ', '+').replace(' / ', '/').replace('] ', ']').replace(' *', '*').replace('* ', '*').replace(') ', ')')
 	#print(oStr)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(oStr)
