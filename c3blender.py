@@ -133,7 +133,7 @@ if __name__ == '__main__':
 		pass
 	elif '--c3demo' in sys.argv:
 		# Runs simple test without blender
-		Build()
+		Build ()
 		sys.exit()
 
 	else:
@@ -446,7 +446,6 @@ draw  = []
 svgText = ''
 userWasmExtern = ''
 userJsLibAPI = ''
-svgRect = [ Vector(( float('inf'), float('inf') )), Vector(( -float('inf'), -float('inf') )) ]
 
 def ExportObject (ob, wasm = False, html = None, useHtml = False):
 	global draw
@@ -721,7 +720,6 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 	global meshes
 	global curves
 	global svgText
-	global svgRect
 	global exportedObs
 	global userWasmExtern
 	global userJsLibAPI

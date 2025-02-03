@@ -11,8 +11,7 @@ def Remap (inFrom, inTo, outFrom, outTo, n):
 	return Lerp(outFrom, outTo, t)
 
 def GenLevel ():
-	global obs
-	bytes = open('/tmp/demo.wasm', 'rb').read()
+	bytes = open('/tmp/demo.opt.wasm', 'rb').read()
 	obCount = 50
 	wallPos = [999, 0]
 	initOffY = 500
