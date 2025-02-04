@@ -115,7 +115,7 @@ def Build (input = './demo.c3', output = 'demo', wasm = '--wasm' in sys.argv, op
 		w = '/tmp/%s.wasm' %output
 		if C3_STRIP_TAIL:
 			C3ToWasmStrip(w)
-		if os.path.isfile('SlimeJump.py'):
+		if os.path.isfile('SlimeJump.py') and os.path.isfile('/tmp/demo.opt.wasm'):
 			import SlimeJump as slimJump
 			slimJump.GenLevel ()
 		return w
@@ -423,12 +423,14 @@ def IsInAnyElement (o, arr : list):
 			return True
 	return False
 
-def Copy (ob, copyData = True, copyActions = True, collection = bpy.context.collection):
+def Copy (ob, copyData = True, copyActions = True, collection = None):
 	copy = ob.copy()
 	if copyData:
 		copy.data = copy.data.copy()
 	if copyActions and copy.animation_data:
 		copy.animation_data.action = copy.animation_data.action.copy()
+	if collection == None:
+		collection = bpy.context.collection
 	collection.objects.link(copy)
 	for child in ob.children:
 		childCopy = Copy(child, copyData, copyActions, collection)
@@ -1637,7 +1639,7 @@ raylib_like_api = {
 		const buf=this.wasm.instance.exports.memory.buffer;
 		const p=new Float32Array(buf,pptr,2);
 		const s=new Float32Array(buf,sptr,2);
-		this.ctx.fillStyle = getColorFromMemory(buf, cptr);
+		this.ctx.sStyle = getColorFromMemory(buf, cptr);
 		this.ctx.fillRect(p[0],p[1],s[0],s[1])
 	}
 	''',
@@ -1692,7 +1694,7 @@ raylib_like_api = {
 		else
 			var pathData_ = new Uint64Array(buf, pathData, pathDataLen);
 		var path = get_path(pathData_, pathDataLen, cyclic);
-		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + '"style="position:absolute;z-index:' + zIndex + '"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + ')"><g id="' + id_ + '"><path id="Material" style="fill:rgb(' + fillColor_[0] + ' ' + fillColor_[1] + ' ' + fillColor_[2] + ');stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
+		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + '"style="z-index:' + zIndex + ';position:absolute"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + ')"><g id="' + id_ + '"><path id="Material" style="fill:rgb(' + fillColor_[0] + ' ' + fillColor_[1] + ' ' + fillColor_[2] + ');stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
 		var suffix = '"/></g></svg>';
 		document.body.innerHTML += prefix + path + suffix;
 	}
