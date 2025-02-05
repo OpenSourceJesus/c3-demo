@@ -437,7 +437,7 @@ def Copy (ob, copyData = True, copyActions = True, collection = None):
 		childCopy.parent = copy
 	return copy
 
-DEFAULT_COLOR = [ 0.5, 0.5, 0.5, 1 ]
+DEFAULT_COLOR = [ 0, 0, 0, 0 ]
 exportedObs = []
 meshes = []
 curves = []
@@ -471,7 +471,7 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 	sx, sy, sz = ob.scale * SCALE
 	idx = len(meshes + curves)
 	scripts = []
-	if ob.type == 'EMPTY':
+	if ob.type == 'EMPTY' and len(ob.children) > 0:
 		idData, idDataLen = ToC3(ob.name)
 		head.append('const char[%s] ID_%s = %s;' %( idDataLen, sname.upper(), idData ))
 		firstAndLastChildIdsTxt = ''
@@ -490,7 +490,7 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 			materialColor = ob.material_slots[0].material.diffuse_color
 		else:
 			materialColor = DEFAULT_COLOR
-		setup.append('	objects[%s].color = { %s, %s, %s, 0xFF };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
+		setup.append('	objects[%s].color = { %s, %s, %s, %s };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
 		draw.append('	self = objects[%s]; //MESH: %s' %( idx, ob.name ))
 		if scripts:
 			props = {}
@@ -579,7 +579,7 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 			materialColor = DEFAULT_COLOR
 		size = max - min
 		setup.append('	objects[%s].scale = { %s, %s };' %( idx, size.x, size.y ))
-		setup.append('	objects[%s].color = { %s, %s, %s, 0 };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255) ))
+		setup.append('	objects[%s].color = { %s, %s, %s, %s };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255), round(materialColor[3] * 255) ))
 		svgText_ = svgText_[: indexOfParentGroupContents] + group + svgText_[indexOfParentGroupEnd :]
 		pathDataIndicator = ' d="'
 		indexOfPathDataStart = svgText_.find(pathDataIndicator) + len(pathDataIndicator)
@@ -1680,6 +1680,9 @@ raylib_like_api = {
 		const pos_ = new Float32Array(buf, pos, 2 * 4);
 		const size_ = new Float32Array(buf, size, 2 * 4);
 		const fillColor_ = new Uint8Array(buf, fillColor, 4);
+		var fillColorTxt = 'transparent';
+		if (fillColor_[3] > 0)
+			fillColorTxt = 'rgb(' + fillColor_[0] + ' ' + fillColor_[1] + ' ' + fillColor_[2] + ')';
 		const lineColor_ = new Uint8Array(buf, lineColor, 4);
 		var lineColorTxt = 'transparent';
 		if (useLine)
@@ -1694,7 +1697,7 @@ raylib_like_api = {
 		else
 			var pathData_ = new Uint64Array(buf, pathData, pathDataLen);
 		var path = get_path(pathData_, pathDataLen, cyclic);
-		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + '"style="z-index:' + zIndex + ';position:absolute"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + ')"><g id="' + id_ + '"><path id="Material" style="fill:rgb(' + fillColor_[0] + ' ' + fillColor_[1] + ' ' + fillColor_[2] + ');stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
+		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + '"style="z-index:' + zIndex + ';position:absolute"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + ')"><g id="' + id_ + '"><path id="Material" style="fill:' + fillColorTxt + ';stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
 		var suffix = '"/></g></svg>';
 		document.body.innerHTML += prefix + path + suffix;
 	}
