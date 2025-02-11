@@ -12,7 +12,7 @@ def Remap (inFrom, inTo, outFrom, outTo, n):
 
 def GenLevel ():
 	bytes = open('/tmp/demo.opt.wasm', 'rb').read()
-	obCount = 50
+	obCount = 70
 	wallPos = [999, 0]
 	initOffY = 500
 	lightPos = [-999,initOffY]
@@ -27,7 +27,7 @@ def GenLevel ():
 		mixMode = bytes[i + 7]
 		byte = bytes[i + 8]
 		wallOff = [180, 0]
-		if byte == 0 or byte == 65:
+		if wallPos[0] > 4500 and (byte == 0 or byte == 65):
 			wallOff = [Remap(0, 255, 180, 900, wallX), Remap(255, 0, -500, 500, wallY)]
 			if abs(wallOff[1]) < 20:
 				wallOff[1] = 0
@@ -45,7 +45,10 @@ def GenLevel ():
 		light.name += '_Clone'
 		light.location.x = lightPos[0]
 		light.location.y = lightPos[1]
-		wall = Copy(bpy.data.objects['UWall'], False)
+		wall = Copy(bpy.data.objects['Wall'], False)
+		wall.hide_set(False)
+		for child in wall.children:
+			child.hide_set(False)
 		wall.name += '_Clone'
 		wall.location.x = wallPos[0]
 		wall.location.y = wallPos[1]

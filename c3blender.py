@@ -155,7 +155,7 @@ if __name__ == '__main__':
 		sys.exit()
 
 # blender #
-MAX_SCRIPTS_PER_OBJECT = 8
+MAX_SCRIPTS_PER_OBJECT = 16
 if not bpy:
 	if isLinux:
 		if not os.path.isfile('/usr/bin/blender'):
@@ -277,14 +277,12 @@ WASM_EXTERN = '''
 extern fn void html_css_string (int id, char *key, char *val) @extern("html_css_string");
 extern fn void html_css_int (int id, char *key, int val) @extern("html_css_int");
 
-extern fn float random () @extern("random");
+extern fn float method (float arg, float arg2, int idx) @extern("method");
 
 extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
 extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
 extern fn void draw_svg (Vector2* pos, Vector2* size, Color* fillColor, bool useLine, float lineWidth, Color* lineColor, bool hide, char[]* id, int idLen, usz[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide, int quantizeType) @extern("draw_svg");
-extern fn void set_svg_path (char[]* id, int idLen, char[]* pathData, int pathDataLen) @extern("set_svg_path");
-extern fn void randomize_svg (char[]* id, int idLen, char[]* initPathData, int initPathDataLen, bool cyclic, float maxDist) @extern("randomize_svg");
 
 extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
 extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
@@ -321,7 +319,7 @@ def GetScripts (ob, isAPI : bool):
 		txt = getattr(ob, type + 'Script' + str(i))
 		if txt != None:
 			if isAPI:
-				scripts.append(( txt.as_string(), getattr(ob, 'jsScript' + str(i)) ))
+				scripts.append(( txt.as_string(), getattr(ob, 'jsScript' + str(i)), getattr(ob, 'c3Script' + str(i)) ))
 			else:
 				scripts.append(( txt.as_string(), getattr(ob, 'initScript' + str(i)) ))
 	return scripts
@@ -441,6 +439,7 @@ DEFAULT_COLOR = [ 0, 0, 0, 0 ]
 exportedObs = []
 meshes = []
 curves = []
+empties = []
 datas = {}
 head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
 setup = [ 'fn void main() @extern("main") @wasm {' ]
@@ -469,9 +468,13 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 	y += offY
 	z += offY
 	sx, sy, sz = ob.scale * SCALE
-	idx = len(meshes + curves)
+	idx = len(meshes + curves + empties)
 	scripts = []
 	if ob.type == 'EMPTY' and len(ob.children) > 0:
+		empties.append(ob)
+		setup.append('	objects[%s].pos = {%s,%s};' %( idx, x, z ))
+		if HandleCopyObject(ob, idx):
+			return
 		idData, idDataLen = ToC3(ob.name)
 		head.append('const char[%s] ID_%s = %s;' %( idDataLen, sname.upper(), idData ))
 		firstAndLastChildIdsTxt = ''
@@ -532,9 +535,9 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 			sx, sy, sz = ob.scale
 			setup.append('	objects[%s].scale = { %s, %s };' %( idx, sx, sz ))
 		if wasm:
-			GreaseToC3Wasm (ob, datas, head, draw_, setup_, scripts, idx)
+			GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, idx)
 		else:
-			GreaseToC3Raylib (ob, datas, head, draw_, setup_)
+			GreaseToC3Raylib (ob, datas, head, draw, setup)
 	elif ob.type == 'CURVE':
 		curves.append(ob)
 		bpy.ops.object.select_all(action = 'DESELECT')
@@ -556,29 +559,16 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 		min += off
 		max *= SCALE
 		max += off
-		setup.append('	objects[%s].pos = { %s, %s };' %( idx, min.x, max.y ))
-		for exportedOb in exportedObs:
-			indexOfPeriod = ob.name.find('.')
-			if indexOfPeriod == -1:
-				obNameWithoutPeriod = ob.name
-			else:
-				obNameWithoutPeriod = ob.name[: indexOfPeriod]
-			indexOfPeriod = exportedOb.name.find('.')
-			if indexOfPeriod == -1:
-				exportedObNameWithoutPeriod = exportedOb.name
-			else:
-				exportedObNameWithoutPeriod = exportedOb.name[: indexOfPeriod]
-			if obNameWithoutPeriod == exportedObNameWithoutPeriod:
-				idData, idDataLen = ToC3(exportedOb.name)
-				setup.append('	copy_node((char[]*) &%s, %s, &(objects[%s].pos));' %( 'ID_' + GetSafeName(exportedOb).upper(), idDataLen, idx ))
-				exportedObs.append(ob)
-				return
+		setup.append('	objects[%s].pos = { %s, %s };' %( idx, round(min.x), round(max.y) ))
+		if HandleCopyObject(ob, idx):
+			return
+		print(ob.name)
 		if len(ob.material_slots) > 0:
 			materialColor = ob.material_slots[0].material.diffuse_color
 		else:
 			materialColor = DEFAULT_COLOR
 		size = max - min
-		setup.append('	objects[%s].scale = { %s, %s };' %( idx, size.x, size.y ))
+		setup.append('	objects[%s].scale = { %s, %s };' %( idx, round(size.x), round(size.y) ))
 		setup.append('	objects[%s].color = { %s, %s, %s, %s };' %( idx, round(materialColor[0] * 255), round(materialColor[1] * 255), round(materialColor[2] * 255), round(materialColor[3] * 255) ))
 		svgText_ = svgText_[: indexOfParentGroupContents] + group + svgText_[indexOfParentGroupEnd :]
 		pathDataIndicator = ' d="'
@@ -714,6 +704,25 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 			]
 	exportedObs.append(ob)
 
+def HandleCopyObject (ob, idx):
+	for exportedOb in exportedObs:
+		indexOfPeriod = ob.name.find('.')
+		if indexOfPeriod == -1:
+			obNameWithoutPeriod = ob.name
+		else:
+			obNameWithoutPeriod = ob.name[: indexOfPeriod]
+		indexOfPeriod = exportedOb.name.find('.')
+		if indexOfPeriod == -1:
+			exportedObNameWithoutPeriod = exportedOb.name
+		else:
+			exportedObNameWithoutPeriod = exportedOb.name[: indexOfPeriod]
+		if obNameWithoutPeriod == exportedObNameWithoutPeriod:
+			idData, idDataLen = ToC3(exportedOb.name)
+			setup.append('	copy_node((char[]*) &%s, %s, &(objects[%s].pos));' %( 'ID_' + GetSafeName(exportedOb).upper(), idDataLen, idx ))
+			exportedObs.append(ob)
+			return True
+	return False
+
 def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}):
 	global head
 	global draw
@@ -721,6 +730,7 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 	global datas
 	global meshes
 	global curves
+	global empties
 	global svgText
 	global exportedObs
 	global userWasmExtern
@@ -740,8 +750,6 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 	offY = world.c3_export_offset_y
 	off = Vector(( offX, offY ))
 	unpackers = {}
-	global_funcs = {}
-	main_init = {}
 	drawHeader = [ 'fn void game_frame() @extern("$") @wasm {' ]
 	head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
 	setup = [ 'fn void main() @extern("main") @wasm {' ]
@@ -760,6 +768,7 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 	global_v2arrays = {}
 	meshes = []
 	curves = []
+	empties = []
 	datas = {}
 	prevParentName = None
 	for ob in bpy.data.objects:
@@ -768,10 +777,11 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 		for scriptInfo in GetScripts(ob, True):
 			script = scriptInfo[0]
 			isJs = scriptInfo[1]
-			if isJs:
+			isC3 = scriptInfo[2]
+			if isJs and not isC3:
 				userJsLibAPI += script
 				continue
-			elif '(' not in script:
+			elif '(' not in script or (isC3 and not isJs):
 				userWasmExtern += script
 			else:
 				lns = script.split('\n')
@@ -793,26 +803,27 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 						if indexOfMethodNameEnd == -1:
 							indexOfMethodNameEnd = indexOfArgsStart
 						methodName = ln[: indexOfMethodNameEnd]
-						newMethodName = ''
-						argNum = 0
-						for char in methodName:
-							if argNum > 0 and char.isupper():
-								newMethodName += '_'
-							newMethodName += char.lower()
-							argNum += 1
-						argsNames = ''
-						for arg in argsList:
-							argNameAndValue = arg.split(' ')
-							if len(argNameAndValue) == 2:
-								argsNames += argNameAndValue[1] + ','
-						argsNames = argsNames[: -1]
-						if len(argsNames) == 0:
-							currentMethod = ln + '\n'
-						else:
-							currentMethod = ln.replace(args[1 :], argsNames) + '\n'
-						wasmExternTxt = 'extern fn void ' + newMethodName + ' ' + args
-						wasmExternTxt += ') @extern("' + methodName + '");'
-						userWasmExtern += wasmExternTxt + '\n'
+						if isJs:
+							newMethodName = ''
+							argNum = 0
+							for char in methodName:
+								if argNum > 0 and char.isupper():
+									newMethodName += '_'
+								newMethodName += char.lower()
+								argNum += 1
+							argsNames = ''
+							for arg in argsList:
+								argNameAndValue = arg.split(' ')
+								if len(argNameAndValue) == 2:
+									argsNames += argNameAndValue[1] + ','
+							argsNames = argsNames[: -1]
+							if len(argsNames) == 0:
+								currentMethod = ln + '\n'
+							else:
+								currentMethod = ln.replace(args[1 :], argsNames) + '\n'
+							wasmExternTxt = 'extern fn void ' + newMethodName + ' ' + args
+							wasmExternTxt += ') @extern("' + methodName + '");'
+							userWasmExtern += wasmExternTxt + '\n'
 					else:
 						currentMethod += ln + '\n'
 						if '}' in ln:
@@ -841,7 +852,7 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 	if not wasm:
 		draw.append('	raylib::end_drawing();')
 	draw.append('}')
-	head.append('Object[%s] objects;' %len(meshes + curves))
+	head.append('Object[%s] objects;' %len(meshes + curves + empties))
 	if unpackers:
 		for gkey in unpackers:
 			head += unpackers[gkey]
@@ -1014,7 +1025,7 @@ def GetDeltaUnpacker (ob, dname, gquant, SCALE, qs, offX, offY):
 		'}'
 	]
 
-def GreaseToC3Raylib (ob, datas, head, draw_, setup_):
+def GreaseToC3Raylib (ob, datas, head, draw, setup):
 	SCALE = WORLD.c3_export_scale
 	offX = WORLD.c3_export_offset_x
 	offY = WORLD.c3_export_offset_y
@@ -1307,7 +1318,7 @@ class JS13KB_Panel (bpy.types.Panel):
 	def draw (self, context):
 		self.layout.prop(context.world, 'c3_js13kb')
 		row = self.layout.row()
-		row.prop(context.world, 'c3_miniapi')
+		row.prop(context.world, 'minify')
 		row.prop(context.world, 'c3_invalid_html')
 		if context.world.c3_js13kb:
 			self.layout.prop(context.world, 'c3_export_zip')
@@ -1385,26 +1396,11 @@ function make_environment(e){
 }
 '''
 JS_LIB_API = '''
-function cstrlen(m,p){
-	var l=0;
-	while(m[p]!=0){l++;p++}
-	return l;
-}
-function cstr_by_ptr (m, p)
+function ptr_to_vec2 (m, p)
 {
-	const l = cstrlen(new Uint8Array(m), p);
-	const b = new Uint8Array(m, p, l);
-	return new TextDecoder().decode(b)
+	return new Float32Array(m, p, 8);
 }
-function random_vector_2d (maxDist)
-{
-	var offsetDist = Math.random() * maxDist;
-	var offsetAng = Math.random() * 2 * Math.PI;
-	var offsetX = Math.cos(offsetAng) * offsetDist;
-	var offsetY = Math.sin(offsetAng) * offsetDist;
-	return [ offsetX, offsetY ]
-}
-function get_path (pathData, pathDataLen, cyclic)
+function get_svg_path (pathData, pathDataLen, cyclic)
 {
 	var path = 'M ' + pathData[0] + ',' + pathData[1] + ' ';
 	for (var i = 2; i < pathDataLen; i += 2)
@@ -1446,14 +1442,6 @@ function remap (inFrom, inTo, outFrom, outTo, n)
 	var t = inv_lerp(inFrom, inTo, n);
 	return lerp(outFrom, outTo, t);
 }
-function scale_by_rect (pos, size, rect)
-{
-	size[0] *= rect.width;
-	size[1] *= rect.height;
-	pos[0] = lerp(rect.x, rect.right, pos[0]);
-	pos[1] = lerp(rect.bottom, rect.y, pos[1]) - size[1];
-	return [ pos, size ]
-}
 function overlaps (pos, size, pos2, size2)
 {
 	return !(pos[0] + size[0] < pos2[0]
@@ -1468,19 +1456,6 @@ function copy_node (id, pos)
 	copy.setAttribute('y', pos[1]);
 	document.body.appendChild(copy);
 	return copy;
-}
-function rotate_2d (v, pivot, deg)
-{
-	var x = v[0] - pivot[0];
-	var y = v[1] - pivot[1];
-	var mag = Math.sqrt(x * x + y * y);
-	var ang = Math.atan2(y, x);
-	ang += deg / 180 / Math.PI;
-	return [pivot[0] + Math.cos(ang) * mag,pivot[1] + Math.sin(ang) * mag];
-}
-function random (min, max)
-{
-	return Math.random() * (max - min) + min;
 }
 
 class api{
@@ -1677,8 +1652,8 @@ raylib_like_api = {
 	draw_svg (pos, size, fillColor, useLine, lineWidth, lineColor, hide, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide, quantizeType)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
-		const pos_ = new Float32Array(buf, pos, 2 * 4);
-		const size_ = new Float32Array(buf, size, 2 * 4);
+		const pos_ = new Float32Array(buf, pos, 8);
+		const size_ = new Float32Array(buf, size, 8);
 		const fillColor_ = new Uint8Array(buf, fillColor, 4);
 		var fillColorTxt = 'transparent';
 		if (fillColor_[3] > 0)
@@ -1696,40 +1671,10 @@ raylib_like_api = {
 			var pathData_ = new Uint32Array(buf, pathData, pathDataLen);
 		else
 			var pathData_ = new Uint64Array(buf, pathData, pathDataLen);
-		var path = get_path(pathData_, pathDataLen, cyclic);
-		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + '"style="z-index:' + zIndex + ';position:absolute"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + ')"><g id="' + id_ + '"><path id="Material" style="fill:' + fillColorTxt + ';stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
+		var path = get_svg_path(pathData_, pathDataLen, cyclic);
+		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + '"style="z-index:' + zIndex + ';position:absolute"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + ')"><g id="' + id_ + '"><path style="fill:' + fillColorTxt + ';stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
 		var suffix = '"/></g></svg>';
 		document.body.innerHTML += prefix + path + suffix;
-	}
-	''',
-	'set_svg_path' : '''
-	set_svg_path (id, idLen, pathData, pathDataLen, cyclic)
-	{
-		const buf = this.wasm.instance.exports.memory.buffer;
-		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
-		const pathData_ = new Uint8Array(buf, pathData, pathDataLen);
-		var path = get_path(pathData_, pathDataLen, cyclic);
-		document.getElementById(id_).children[0].setAttribute('d', path);
-	}
-	''',
-	'randomize_svg' : '''
-	randomize_svg (id, idLen, initPathData, initPathDataLen, cyclic, maxDist)
-	{
-		const buf = this.wasm.instance.exports.memory.buffer;
-		var id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
-		const initPathData_ = new Uint8Array(buf, initPathData, initPathDataLen);
-		var offset = random_vector_2d(maxDist);
-		var path = 'M ' + (initPathData_[0] + offset[0]) + ',' + (initPathData_[1] + offset[1]) + ' ';
-		for (var i = 2; i < initPathDataLen; i += 2)
-		{
-			var offset = random_vector_2d(maxDist);
-			if (i - 2 % 6 == 0)
-				path += 'C ';
-			path += '' + (initPathData_[i] + offset[0]) + ',' + (initPathData_[i + 1] + offset[1]) + ' ';
-		}
-		if (cyclic)
-			path += 'Z';
-		document.getElementById(id_).children[0].setAttribute('d', path);
 	}
 	''',
 	'ClearBackground' : '''
@@ -1779,8 +1724,9 @@ raylib_like_api = {
 	add_group (id, idLen, firstAndLastChildIds, firstAndLastChildIdsLen)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
-		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
-		const firstAndLastChildIds_ = new TextDecoder().decode(new Uint8Array(buf, firstAndLastChildIds, firstAndLastChildIdsLen));
+		var decoder = new TextDecoder();
+		const id_ = decoder.decode(new Uint8Array(buf, id, idLen - 1));
+		const firstAndLastChildIds_ = decoder.decode(new Uint8Array(buf, firstAndLastChildIds, firstAndLastChildIdsLen));
 		var firstChild = '';
 		var lastChild = '';
 		var foundLastChild = '';
@@ -1811,10 +1757,24 @@ raylib_like_api = {
 			var id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		else
 			var id_ = id;
-		const pos_ = new Float32Array(buf, pos, 2 * 4);
+		const pos_ = new Float32Array(buf, pos, 8);
 		copy_node (id_, pos_);
 	}
 	''',
+	'method' : '''
+	method (arg, arg2, idx)
+	{
+		if (idx == 0)
+			return Math.sqrt(arg);
+		else if (idx == 1)
+			return Math.cos(arg);
+		else if (idx == 2)
+			return Math.sin(arg);
+		else if (idx == 3)
+			return Math.atan2(arg, arg2);
+		else
+			return Math.random() * (arg2 - arg) + arg;
+	}''',
 }
 
 raylib_like_api_mini = {}
@@ -1880,18 +1840,10 @@ def GenJsAPI (world, c3, userMethods):
 		skip.append('GetScreenHeight')
 	if not IsInAnyElement('draw_svg', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('draw_svg')
-	if not IsInAnyElement('set_svg_path', [ c3, userJsLibAPI, draw_, setup_ ]):
-		skip.append('set_svg_path')
-	if not IsInAnyElement('randomize_svg', [ c3, userJsLibAPI, draw_, setup_ ]):
-		skip.append('randomize_svg')
 	if not IsInAnyElement('add_group', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('add_group')
 	if not IsInAnyElement('copy_node', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('copy_node')
-	if not IsInAnyElement('rotate_2d', [ c3, userJsLibAPI, draw_, setup_ ]):
-		skip.append('rotate_2d')
-	if not IsInAnyElement('scale_by_rect', [ c3, userJsLibAPI, draw_, setup_ ]):
-		skip.append('scale_by_rect')
 	if not IsInAnyElement('clamp', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('clamp')
 	if not IsInAnyElement('get_pos_and_size', [ c3, userJsLibAPI, draw_, setup_ ]):
@@ -1899,17 +1851,17 @@ def GenJsAPI (world, c3, userMethods):
 	if not IsInAnyElement('lerp', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('lerp')
 	if not IsInAnyElement('inv_lerp', [ c3, userJsLibAPI, draw_, setup_ ]):
-		skip.append('lerp')
+		skip.append('inv_lerp')
 	if not IsInAnyElement('remap', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('remap')
-	if not IsInAnyElement('get_path', [ c3, userJsLibAPI, draw_, setup_ ]):
-		skip.append('get_path')
-	if not IsInAnyElement('random_vector_2d', [ c3, userJsLibAPI, draw_, setup_ ]):
-		skip.append('random_vector_2d')
+	if not IsInAnyElement('get_svg_path', [ c3, userJsLibAPI, draw_, setup_ ]):
+		skip.append('get_svg_path')
 	if not IsInAnyElement('overlaps', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('overlaps')
 	if not IsInAnyElement('random', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('random')
+	# if not IsInAnyElement('method', [ c3, userJsLibAPI, draw_, setup_ ]):
+	# 	skip.append('method')
 	if world.c3_js13kb:
 		js = [ userJsLibAPI, JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
@@ -1951,7 +1903,7 @@ def GenJsAPI (world, c3, userMethods):
 	js = '\n'.join(js)
 	if 'getColorFromMemory' in js or 'color_hex_unpacked' in js:
 		js = JS_LIB_COLOR_HELPERS + js
-	if world.c3_miniapi:
+	if world.minify:
 		for methodName in raylib_like_api_mini:
 			if methodName != 'raylib_js_set_entry':
 				js = js.replace(methodName, raylib_like_api_mini[methodName]['sym'])
@@ -1978,7 +1930,7 @@ def GenHtml (world, wasm, c3, userHTML = None, background = '', userMethods = {}
 	jsTmp = '/tmp/c3api.js'
 	jsLib = GenJsAPI(world, c3, userMethods)
 	open(jsTmp, 'w').write(jsLib)
-	if world.c3_miniapi:
+	if world.minify:
 		jsLib = subprocess.run(('uglifyjs -m -- ' + jsTmp).split(), capture_output = True).stdout
 		open(jsTmp, 'wb').write(jsLib)
 	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', jsTmp ]
@@ -2005,7 +1957,7 @@ def GenHtml (world, wasm, c3, userHTML = None, background = '', userMethods = {}
 		o = [
 			'<!DOCTYPE html>',
 			'<html>',
-			'<body % sstyle="width:600px;height:300px;overflow:hidden;">' %background,
+			'<body %s style="width:600px;height:300px;overflow:hidden;">' %background,
 			'<canvas id="$"></canvas>',
 			'<script>', 
 			'var $0="%s"' % jsB,
@@ -2064,7 +2016,7 @@ def BuildWasm (world):
 	userMethods = {}
 	o = BlenderToC3(world, wasm = True, html = userHTML, methods = userMethods)
 	oStr = '\n'.join(o)
-	if world.c3_miniapi:
+	if world.minify:
 		lns = oStr.split('\n')
 		oStr = ''
 		for ln in lns:
@@ -2169,7 +2121,7 @@ bpy.types.World.c3_export_offset_y = bpy.props.IntProperty(name = 'Offset Y', de
 
 bpy.types.World.c3_export_html = bpy.props.StringProperty(name = 'C3 export (.html)')
 bpy.types.World.c3_export_zip = bpy.props.StringProperty(name = 'C3 export (.zip)')
-bpy.types.World.c3_miniapi = bpy.props.BoolProperty(name = 'Minifiy')
+bpy.types.World.minify = bpy.props.BoolProperty(name = 'Minifiy')
 bpy.types.World.c3_js13kb = bpy.props.BoolProperty(name = 'js13k: Error on export if output is over 13KB')
 bpy.types.World.c3_invalid_html = bpy.props.BoolProperty(name = 'Save space with invalid html wrapper')
 
@@ -2228,7 +2180,12 @@ for i in range(MAX_SCRIPTS_PER_OBJECT):
 	setattr(
 		bpy.types.Object,
 		'jsScript' + str(i),
-		bpy.props.BoolProperty(name = 'JS only'),
+		bpy.props.BoolProperty(name = 'JS'),
+	)
+	setattr(
+		bpy.types.Object,
+		'c3Script' + str(i),
+		bpy.props.BoolProperty(name = 'C3'),
 	)
 	setattr(
 		bpy.types.Object,
@@ -2275,6 +2232,7 @@ class ScriptsPanel (bpy.types.Panel):
 				row = self.layout.row()
 				row.prop(ob, 'apiScript' + str(i))
 				row.prop(ob, 'jsScript' + str(i))
+				row.prop(ob, 'c3Script' + str(i))
 				row.prop(ob, 'apiScript%sDisable' %i)
 			if not foundUnassignedScript:
 				foundUnassignedScript = not hasProperty
@@ -2323,45 +2281,15 @@ if __name__ == '__main__':
 		elif arg.startswith('--output='):
 			bpy.data.worlds[0].c3_export_html = arg.split('=')[-1]
 		elif arg == '--minifiy':
-			bpy.data.worlds[0].c3_miniapi = True
+			bpy.data.worlds[0].minify = True
 		elif arg == '--js13k':
-			bpy.data.worlds[0].c3_miniapi = True
+			bpy.data.worlds[0].minify = True
 			bpy.data.worlds[0].c3_js13kb = True
 			bpy.data.worlds[0].c3_invalid_html = True
 	bpy.app.timers.register(Update)
 	for ob in bpy.data.objects:
-		if ob.type in [ 'MESH', 'CURVE' ]:
+		if ob.type in [ 'MESH', 'CURVE', 'EMPTY' ]:
 			ob.name = ob.name.replace('é', 'e').replace('(', '_').replace(')', '_')
-			# if ob.type == 'CURVE':
-			# 	isRotated = False
-			# 	spline = ob.data.splines[0]
-			# 	points = spline.bezier_points
-			# 	if ob.rotation_mode == 'QUATERNION':
-			# 		prevRot = ob.rotation_quaternion
-			# 		if prevRot != Quaternion((1, 0, 0, 0)):
-			# 			isRotated = True
-			# 			ob.rotation_quaternion.identity()
-			# 	else:
-			# 		prevRot = ob.rotation_euler
-			# 		if prevRot != Euler((0, 0, 0)):
-			# 			isRotated = True
-			# 			ob.rotation_euler.zero()
-			# 	if isRotated:
-			# 		for point in points:
-			# 			point_ = point.co
-			# 			point_.rotate(prevRot)
-			# 			leftHandle = point.handle_left
-			# 			leftHandle.rotate(prevRot)
-			# 			rightHandle = point.handle_right
-			# 			rightHandle.rotate(prevRot)
-				# if ob.scale != Vector(( 1, 1, 1 )):
-				# 	prevScale = ob.scale
-				# 	prevMin, prevMax = GetCurveRectMinMax(ob)
-				# 	ob.scale = Vector(( 1, 1, 1 ))
-				# 	for point in points:
-				# 		point.co *= prevScale
-				# 	_min, _max = GetCurveRectMinMax(ob)
-				# 	ob.location += ToVector3(prevMin - _min)
 	if '--test' in sys.argv or test:
 		import c3blendgen
 		if test:
