@@ -206,11 +206,9 @@ struct Vector2_16bits @packed {
 HEADER_OBJECT = '''
 struct Object {
 	Vector2 pos;
-	Vector2 vel;
 	Vector2 scale;
 	Color color;
 	int id;
-	bool hide;
 }
 '''
 HEADER_EVENT = '''
@@ -251,7 +249,7 @@ fn void transform_spline_wasm (Vector2 *source, Vector2 *target, int len, Vector
 }
 '''
 MAIN_WASM = '''
-	html_canvas_resize(%s, %s);
+	//html_canvas_resize(%s, %s);
 	raylib_js_set_entry(&game_frame);
 
 '''
@@ -274,38 +272,39 @@ def GetSafeName (ob):
 	return ob.name.replace('é', 'e').lower().replace('(', '_').replace(')', '_').replace('.', '_').replace(' ', '_')
 
 WASM_EXTERN = '''
-extern fn void html_css_string (int id, char *key, char *val) @extern("html_css_string");
-extern fn void html_css_int (int id, char *key, int val) @extern("html_css_int");
+//extern fn void html_css_string (int id, char *key, char *val) @extern("html_css_string");
+//extern fn void html_css_int (int id, char *key, int val) @extern("html_css_int");
 
 extern fn float method (float arg, float arg2, int idx) @extern("method");
 
-extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
-extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
+//extern fn void draw_circle_wasm (int x, int y, float radius, Color color) @extern("DrawCircleWASM");
+//extern fn void draw_spline_wasm (Vector2 *points, int pointCount, float thick, int use_fill, char r, char g, char b, float a) @extern("DrawSplineLinearWASM");
 
-extern fn void draw_svg (Vector2* pos, Vector2* size, Color* fillColor, bool useLine, float lineWidth, Color* lineColor, bool hide, char[]* id, int idLen, usz[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide, int quantizeType) @extern("draw_svg");
+extern fn void draw_svg (Vector2* pos, Vector2* size, Color* fillColor, float lineWidth, Color* lineColor, char[]* id, int idLen, usz[]* pathData, int pathDataLen, int zIndex, bool cyclic, bool collide, int quantizeType) @extern("draw_svg");
 
-extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
-extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
-extern fn void html_add_char (int id, char c) @extern("html_add_char");
+//extern fn int html_new_text (char *ptr, float x, float y, float sz, bool viz, char *id) @extern("html_new_text");
+//extern fn void html_set_text (int id, char *ptr) @extern("html_set_text");
+//extern fn void html_add_char (int id, char c) @extern("html_add_char");
 
-extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");
-extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");
-extern fn void html_css_scale_y (int id, float scale) @extern("html_css_scale_y");
+//extern fn void html_set_position (int id, float x, float y) @extern("html_set_position");
+//extern fn void html_css_scale (int id, float scale) @extern("html_css_scale");
+//extern fn void html_css_scale_y (int id, float scale) @extern("html_css_scale_y");
 
-extern fn void html_css_zindex (int id, int z) @extern("html_css_zindex");
-extern fn void html_canvas_clear () @extern("html_canvas_clear");
-extern fn void html_canvas_resize (int x, int y) @extern("html_canvas_resize");
+//extern fn void html_css_zindex (int id, int z) @extern("html_css_zindex");
+//extern fn void html_canvas_clear () @extern("html_canvas_clear");
+//extern fn void html_canvas_resize (int x, int y) @extern("html_canvas_resize");
 
-def JSCallback = fn void( int );
-extern fn void html_bind_onclick (int id, JSCallback ptr, int ob_index) @extern("html_bind_onclick");
+//def JSCallback = fn void( int );
+//extern fn void html_bind_onclick (int id, JSCallback ptr, int ob_index) @extern("html_bind_onclick");
 
-extern fn void html_eval (char *ptr) @extern("html_eval");
+//extern fn void html_eval (char *ptr) @extern("html_eval");
 
-extern fn char wasm_memory (int idx) @extern("wasm_memory");
-extern fn int wasm_size () @extern("wasm_size");
+//extern fn char wasm_memory (int idx) @extern("wasm_memory");
+//extern fn int wasm_size () @extern("wasm_size");
 
 extern fn void add_group (char[]* id, int idLen, char[]* firstAndLastChildIds, int firstAndLastChildIdsLen) @extern("add_group");
 extern fn void copy_node (char[]* id, int idLen, Vector2* pos) @extern("copy_node");
+//extern fn void random (float min, float max) @extern("random");
 '''
 
 def GetScripts (ob, isAPI : bool):
@@ -441,7 +440,7 @@ meshes = []
 curves = []
 empties = []
 datas = {}
-head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
+head = [ HEADER, HEADER_OBJECT ]#, HEADER_EVENT ]
 setup = [ 'fn void main() @extern("main") @wasm {' ]
 draw  = []
 svgText = ''
@@ -555,6 +554,8 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 		indexOfParentGroupContents = svgText_.find('\n', indexOfParentGroupStart + len(parentGroupIndicator))
 		indexOfParentGroupEnd = svgText_.rfind('</g')
 		min, max = GetCurveRectMinMax(ob)
+		# min *= Vector((sx, sy))
+		# max *= Vector((sx, sy))
 		min *= SCALE
 		min += off
 		max *= SCALE
@@ -613,13 +614,14 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 		isCyclicStr = str(cyclic).lower()
 		collideStr = str(ob.collide).lower()
 		strokeColorArg = 'null'
+		strokeWidth = 0
 		if ob.useSvgStroke:
 			strokeColorStr = '{ %s, %s, %s, 0 }' %( round(ob.svgStrokeColor[0] * 255), round(ob.svgStrokeColor[1] * 255), round(ob.svgStrokeColor[2] * 255) )
 			head.append('const Color LINE_COLOR_%s = %s;' %( sname.upper(), strokeColorStr ))
 			strokeColorArg = '(Color*) &LINE_COLOR_' + sname.upper()
-		useSvgStrokeStr = str(ob.useSvgStroke).lower()
-		setup.append('	draw_svg(&(objects[%s].pos), &(objects[%s].scale), &(objects[%s].color), %s, %s, %s, objects[%s].hide, (char[]*) &%s, %s, (%s[]*) &%s, %s, %s, %s, %s, %s);'
-			%( idx, idx, idx, useSvgStrokeStr, ob.svgStrokeWidth, strokeColorArg, idx, 'ID_' + sname.upper(), idDataLen, 'usz', 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr, quantizeType ))
+			strokeWidth = ob.svgStrokeWidth
+		setup.append('	draw_svg(&(objects[%s].pos), &(objects[%s].scale), &(objects[%s].color), %s, %s, (char[]*) &%s, %s, (%s[]*) &%s, %s, %s, %s, %s, %s);'
+			%( idx, idx, idx, strokeWidth, strokeColorArg, 'ID_' + sname.upper(), idDataLen, 'usz', 'PATH_DATA_' + sname.upper(), pathDataLen, round(ob.location.z), isCyclicStr, collideStr, quantizeType ))
 	elif ob.type == 'FONT' and wasm:
 		cscale = ob.data.size * SCALE
 		if useHtml:
@@ -751,20 +753,20 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 	off = Vector(( offX, offY ))
 	unpackers = {}
 	drawHeader = [ 'fn void game_frame() @extern("$") @wasm {' ]
-	head = [ HEADER, HEADER_OBJECT, HEADER_EVENT ]
+	head = [ HEADER, HEADER_OBJECT ]#, HEADER_EVENT ]
 	setup = [ 'fn void main() @extern("main") @wasm {' ]
 	draw = []
 	if wasm:
 		setup.append(MAIN_WASM %( resX, resY ))
-		draw.append('	html_canvas_clear();')
+		# draw.append('	html_canvas_clear();')
 	else:
 		setup.append(MAIN %( resX, resY ))
 		draw.append('	raylib::begin_drawing();')
 		draw.append('	raylib::clear_background({ 0xFF, 0xFF, 0xFF, 0xFF });')
 	if wasm:
-		head.append(HEADER_OBJECT_WASM)
+		# head.append(HEADER_OBJECT_WASM)
 		head.append(WASM_EXTERN)
-		head.append(WASM_HELPERS)
+		# head.append(WASM_HELPERS)
 	global_v2arrays = {}
 	meshes = []
 	curves = []
@@ -1457,6 +1459,16 @@ function copy_node (id, pos)
 	document.body.appendChild(copy);
 	return copy;
 }
+function random_vector_2d (mD)
+{
+    var dt = random(0, mD);
+    var ag = random(0, 2 * Math.PI);
+    return [ Math.cos(ag) * dt, Math.sin(ag) * dt ];
+}
+function random (min, max)
+{
+	return Math.random() * (max - min) + min;
+}
 
 class api{
 	proxy(){
@@ -1649,7 +1661,7 @@ raylib_like_api = {
 	}
 	''',
 	'draw_svg' : '''
-	draw_svg (pos, size, fillColor, useLine, lineWidth, lineColor, hide, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide, quantizeType)
+	draw_svg (pos, size, fillColor, lineWidth, lineColor, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide, quantizeType)
 	{
 		const buf = this.wasm.instance.exports.memory.buffer;
 		const pos_ = new Float32Array(buf, pos, 8);
@@ -1660,7 +1672,7 @@ raylib_like_api = {
 			fillColorTxt = 'rgb(' + fillColor_[0] + ' ' + fillColor_[1] + ' ' + fillColor_[2] + ')';
 		const lineColor_ = new Uint8Array(buf, lineColor, 4);
 		var lineColorTxt = 'transparent';
-		if (useLine)
+		if (lineWidth > 0)
 			lineColorTxt = 'rgb(' + lineColor_[0] + ' ' + lineColor_[1] + ' ' + lineColor_[2] + ')';
 		const id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		if (quantizeType == 0)
@@ -1672,7 +1684,7 @@ raylib_like_api = {
 		else
 			var pathData_ = new Uint64Array(buf, pathData, pathDataLen);
 		var path = get_svg_path(pathData_, pathDataLen, cyclic);
-		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + '"style="z-index:' + zIndex + ';position:absolute"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + ')"><g id="' + id_ + '"><path style="fill:' + fillColorTxt + ';stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
+		var prefix = '<svg xmlns="www.w3.org/2000/svg"id="' + id_ + '"viewBox="0 0 ' + (size_[0] + lineWidth * 2) + ' ' + (size_[1] + lineWidth * 2) + '"style="z-index:' + zIndex + ';position:absolute"collide=' + collide + ' x=' + pos_[0] + ' y=' + pos_[1] + ' width=' + size_[0] + ' height=' + size_[1] + ' transform="scale(1,-1)translate(' + pos_[0] + ',' + pos_[1] + ')"><g><path style="fill:' + fillColorTxt + ';stroke-width:' + lineWidth + ';stroke:' + lineColorTxt + '" d="';
 		var suffix = '"/></g></svg>';
 		document.body.innerHTML += prefix + path + suffix;
 	}
@@ -1761,20 +1773,6 @@ raylib_like_api = {
 		copy_node (id_, pos_);
 	}
 	''',
-	'method' : '''
-	method (arg, arg2, idx)
-	{
-		if (idx == 0)
-			return Math.sqrt(arg);
-		else if (idx == 1)
-			return Math.cos(arg);
-		else if (idx == 2)
-			return Math.sin(arg);
-		else if (idx == 3)
-			return Math.atan2(arg, arg2);
-		else
-			return Math.random() * (arg2 - arg) + arg;
-	}''',
 }
 
 raylib_like_api_mini = {}
@@ -1933,6 +1931,9 @@ def GenHtml (world, wasm, c3, userHTML = None, background = '', userMethods = {}
 	if world.minify:
 		jsLib = subprocess.run(('uglifyjs -m -- ' + jsTmp).split(), capture_output = True).stdout
 		open(jsTmp, 'wb').write(jsLib)
+		if os.path.isfile('SlimeJump.py'):
+			import SlimeJump as slimJump
+			slimJump.Minify (jsTmp)
 	cmd = [ 'gzip', '--keep', '--force', '--verbose', '--best', jsTmp ]
 	print(cmd)
 	subprocess.check_call(cmd)

@@ -10,6 +10,13 @@ def Remap (inFrom, inTo, outFrom, outTo, n):
 	t = InvLerp(inFrom, inTo, n)
 	return Lerp(outFrom, outTo, t)
 
+def Minify (filePath):
+	map = { 'pos[' : 'ps[', 'pos=' : 'ps=', 'moveSpeed' : 'mS', 'moveSpeeds' : 'ms', 'prevMove' : 'pM', 'prevGrounded' : 'pG', 'upKeyPressed' : 'uP', 'leftKeyPressed' : 'lP', 'rightKeyPressed' : 'rP', 'prevUpKeyPressed' : 'pU', 'prevLeftKeyPressed' : 'pL', 'prevRightKeyPressed' : 'pR', 'eggsHeld' : 'eH', 'eggsCollected' : 'eC', 'sizeRange_Cloud' : 'sC', 'sizeRange_Stalactite' : 'sS', 'spawnInterval' : 'sI', 'spawnPosRange' : 'sP', 'moveSpeedRange' : 'mR', 'valueRange' : 'vR', 'spawnTimer' : 'sT', 'shootTimer' : 'aa', 'cellSize' : 'cS', 'obMap' : 'oM', 'get_cell_pos' : 'gC', 'get_close_objects' : 'gO', 'get_close_objects_to_cell' : 'go', 'gravity' : 'gr', 'jumpSpeed' : 'jS', 'moveSpeed_Player' : 'Ms', 'sizes' : 'ss', 'scaleX' : 'sX', 'initPositions' : 'iP', 'initPathsDatas' : 'iD', 'initRect' : 'iR'}#, 'elmt' : 'et' }
+	txt = open(filePath, 'r').read()
+	for key in map:
+		txt = txt.replace(key, map[key])
+	open(filePath, 'w').write(txt)
+
 def GenLevel ():
 	bytes = open('/tmp/demo.opt.wasm', 'rb').read()
 	obCount = 70
