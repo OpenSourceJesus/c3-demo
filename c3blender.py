@@ -481,8 +481,8 @@ def ExportObject (ob, wasm = False, html = None, useHtml = False):
 		firstAndLastChildIdsData, firstAndLastChildIdsDataLen = ToC3(firstAndLastChildIdsTxt)
 		head.append('const char[%s] FIRST_AND_LAST_CHILD_IDS_%s = %s;' %( firstAndLastChildIdsDataLen, sname.upper(), firstAndLastChildIdsData ))
 		setup.append('	add_group((char[]*) &%s, %s, (char[]*) &%s, %s);' %( 'ID_' + sname.upper(), idDataLen, 'FIRST_AND_LAST_CHILD_IDS_' + sname.upper(), firstAndLastChildIdsDataLen ))
-		for ob_ in ob.children:
-			ExportObject (ob_)
+		for child in ob.children:
+			ExportObject (child)
 	elif ob.type == "MESH":
 		meshes.append(ob)
 		setup.append('	objects[%s].pos = {%s,%s};' %( idx, x, z ))
@@ -1738,23 +1738,11 @@ raylib_like_api = {
 		var decoder = new TextDecoder();
 		const id_ = decoder.decode(new Uint8Array(buf, id, idLen - 1));
 		const firstAndLastChildIds_ = decoder.decode(new Uint8Array(buf, firstAndLastChildIds, firstAndLastChildIdsLen));
-		var firstChild = '';
-		var lastChild = '';
-		var foundLastChild = '';
-		for (var i = 0; i < firstAndLastChildIdsLen; i ++)
-		{
-			var char = firstAndLastChildIds_[i];
-			if (char == ',')
-				foundLastChild = true;
-			else if (foundLastChild)
-				firstChild += char;
-			else
-				lastChild += char;
-		}
+		var children = firstAndLastChildIds_.split(',');
 		var html = document.body.innerHTML;
-		var indexOfFirstChild = html.indexOf(firstChild);
+		var indexOfFirstChild = html.indexOf(children[1]);
 		indexOfLastChild = html.indexOf('</svg>', indexOfFirstChild) + 6;
-		var indexOfLastChild = html.indexOf(lastChild);
+		var indexOfLastChild = html.indexOf(children[0]);
 		indexOfLastChild = html.lastIndexOf('<', indexOfLastChild);
 		document.body.innerHTML = html.slice(0, indexOfFirstChild) + '</g>' + html.slice(indexOfFirstChild);
 		document.body.innerHTML = html.slice(0, indexOfLastChild) + '<g id="' + id_ + '">' + html.slice(indexOfLastChild);
