@@ -170,38 +170,38 @@ import raylib;
 def Entry = fn void();
 extern fn void raylib_js_set_entry(Entry entry) @extern("_") @wasm;
 
-bitstruct Vector2_4bits : ichar {
-	ichar x : 4..7;
-	ichar y : 0..3;
-}
+//bitstruct Vector2_4bits : ichar {
+//	ichar x : 4..7;
+//	ichar y : 0..3;
+//}
 
-bitstruct Vector2_6bits : int {
-	ichar x0 : 26..31;  // 6bits
-	ichar y0 : 20..25;  // 6bits
-	ichar x1 : 15..19;  // 5bits
-	ichar y1 : 10..14;  // 5bits
-	ichar x2 : 5..9;    // 5bits
-	ichar y2 : 0..4;    // 5bits
-}
+//bitstruct Vector2_6bits : int {
+//	ichar x0 : 26..31;  // 6bits
+//	ichar y0 : 20..25;  // 6bits
+//	ichar x1 : 15..19;  // 5bits
+//	ichar y1 : 10..14;  // 5bits
+//	ichar x2 : 5..9;    // 5bits
+//	ichar y2 : 0..4;    // 5bits
+//}
 
-bitstruct Vector2_7bits : int {
-	ichar x0 : 24..31;  // 8bits
-	ichar y0 : 17..23;  // 8bits
-	ichar x1 : 12..16;  // 4bits
-	ichar y1 : 8..11;  // 4bits
-	ichar x2 : 4..7;    // 4bits
-	ichar y2 : 0..3;    // 4bits
-}
+//bitstruct Vector2_7bits : int {
+//	ichar x0 : 24..31;  // 8bits
+//	ichar y0 : 17..23;  // 8bits
+//	ichar x1 : 12..16;  // 4bits
+//	ichar y1 : 8..11;  // 4bits
+//	ichar x2 : 4..7;    // 4bits
+//	ichar y2 : 0..3;    // 4bits
+//}
 
-struct Vector2_8bits @packed {
-	ichar x;
-	ichar y;
-}
+//struct Vector2_8bits @packed {
+//	ichar x;
+//	ichar y;
+//}
 
-struct Vector2_16bits @packed {
-	short x;
-	short y;
-}
+//struct Vector2_16bits @packed {
+//	short x;
+//	short y;
+//}
 '''
 HEADER_OBJECT = '''
 struct Object {
@@ -735,8 +735,8 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 	global empties
 	global svgText
 	global exportedObs
-	global userWasmExtern
 	global userJsLibAPI
+	global userWasmExtern
 	for ob in bpy.data.objects:
 		if '_Clone' in ob.name:
 			for child in ob.children:
@@ -759,14 +759,13 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 	if wasm:
 		setup.append(MAIN_WASM %( resX, resY ))
 		# draw.append('	html_canvas_clear();')
+		# head.append(HEADER_OBJECT_WASM)
+		head.append(WASM_EXTERN)
+		# head.append(WASM_HELPERS)
 	else:
 		setup.append(MAIN %( resX, resY ))
 		draw.append('	raylib::begin_drawing();')
 		draw.append('	raylib::clear_background({ 0xFF, 0xFF, 0xFF, 0xFF });')
-	if wasm:
-		# head.append(HEADER_OBJECT_WASM)
-		head.append(WASM_EXTERN)
-		# head.append(WASM_HELPERS)
 	global_v2arrays = {}
 	meshes = []
 	curves = []
@@ -864,7 +863,7 @@ def BlenderToC3 (world, wasm = False, html = None, useHtml = False, methods = {}
 		print('total-points:', datas[dname]['total-points'])
 	return head + setup + drawHeader + draw
 
-def GreaseToC3Wasm (ob, datas, head, draw_, setup_, scripts, obIndex):
+def GreaseToC3Wasm (ob, datas, head, draw, setup, scripts, obIndex):
 	SCALE = WORLD.c3_export_scale
 	offX = WORLD.c3_export_offset_x
 	offY = WORLD.c3_export_offset_y
@@ -1258,7 +1257,7 @@ _BUILD_INFO = {
 }
 
 @bpy.utils.register_class
-class C3Export(bpy.types.Operator):
+class C3Export (bpy.types.Operator):
 	bl_idname = 'c3.export'
 	bl_label = 'C3 Export EXE'
 
@@ -1273,7 +1272,7 @@ class C3Export(bpy.types.Operator):
 		return {'FINISHED'}
 
 @bpy.utils.register_class
-class C3Export(bpy.types.Operator):
+class C3Export (bpy.types.Operator):
 	bl_idname = 'c3.export_wasm'
 	bl_label = 'C3 Export WASM'
 
@@ -1286,7 +1285,7 @@ class C3Export(bpy.types.Operator):
 		return {'FINISHED'}
 
 @bpy.utils.register_class
-class C3WorldPanel(bpy.types.Panel):
+class C3WorldPanel (bpy.types.Panel):
 	bl_idname = 'WORLD_PT_C3World_Panel'
 	bl_label = 'C3 Export'
 	bl_space_type = 'PROPERTIES'
@@ -1398,9 +1397,9 @@ function make_environment(e){
 }
 '''
 JS_LIB_API = '''
-function ptr_to_vec2 (m, p)
+function wasm_memory ()
 {
-	return new Float32Array(m, p, 8);
+	return $.wasm.instance.exports.memory.buffer;
 }
 function get_svg_path (pathData, pathDataLen, cyclic)
 {
@@ -1500,27 +1499,27 @@ c3dom_api = {
 		var e = document.createElement('pre');
 		e.style = 'position:absolute;left:' + r + '; top:' + g + '; font-size:' + b;
 		e.hidden = h;
-		e.id=cstr_by_ptr(this.wasm.instance.exports.memory.buffer, id);
+		e.id=cstr_by_ptr(wasm_memory(), id);
 		document.body.append(e);
-		e.append(cstr_by_ptr(this.wasm.instance.exports.memory.buffer, ptr));
+		e.append(cstr_by_ptr(wasm_memory(), ptr));
 		return this.elts.push(e) - 1
 	}
 	''',
 	'html_css_string' : '''
 	html_css_string(idx,a,b){
-		a=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,a);
-		this.elts[idx].style[a]=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,b)
+		a=cstr_by_ptr(wasm_memory(),a);
+		this.elts[idx].style[a]=cstr_by_ptr(wasm_memory(),b)
 	}
 	''',
 	'html_css_int' : '''
 	html_css_int(idx,a,b){
-		a=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,a);
+		a=cstr_by_ptr(wasm_memory(),a);
 		this.elts[idx].style[a]=b
 	}
 	''',
 	'html_set_text' : '''
 	html_set_text(idx,ptr){
-		this.elts[idx].firstChild.nodeValue=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
+		this.elts[idx].firstChild.nodeValue=cstr_by_ptr(wasm_memory(),ptr)
 	}
 	''',
 	'html_add_char' : '''
@@ -1553,7 +1552,7 @@ c3dom_api = {
 	'html_bind_onclick' : '''
 	html_bind_onclick(idx,f,oidx){
 		var elt=this.elts[idx];
-		elt._onclick_=this.wasm.instance.exports.__indirect_function_table.get(f);
+		elt._onclick_=$.wasm.instance.exports.__indirect_function_table.get(f);
 		elt.onclick=function(){
 			self=elt;
 			elt._onclick_(oidx)
@@ -1562,7 +1561,7 @@ c3dom_api = {
 	''',
 	'html_eval' : '''
 	html_eval(ptr){
-		var _=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr);
+		var _=cstr_by_ptr(wasm_memory(),ptr);
 		eval(_)
 	}
 	''',
@@ -1596,14 +1595,14 @@ c3dom_api = {
 raylib_like_api = {
 	'raylib_js_set_entry' : '''
 	_(f){
-		this.entryFunction=this.wasm.instance.exports.__indirect_function_table.get(f)
+		this.entryFunction=$.wasm.instance.exports.__indirect_function_table.get(f)
 	}
 	''',
 	'InitWindow' : '''
 	InitWindow(w,h,ptr){
 		this.canvas.width=w;
 		this.canvas.height=h;
-		document.title=cstr_by_ptr(this.wasm.instance.exports.memory.buffer,ptr)
+		document.title=cstr_by_ptr(wasm_memory(),ptr)
 	}
 	''',
 	'GetScreenWidth' : '''
@@ -1623,7 +1622,7 @@ raylib_like_api = {
 	''',
 	'DrawRectangleV' : '''
 	DrawRectangleV(pptr,sptr,cptr){
-		const buf=this.wasm.instance.exports.memory.buffer;
+		const buf=wasm_memory();
 		const p=new Float32Array(buf,pptr,2);
 		const s=new Float32Array(buf,sptr,2);
 		this.ctx.sStyle = getColorFromMemory(buf, cptr);
@@ -1632,7 +1631,7 @@ raylib_like_api = {
 	''',
 	'DrawSplineLinearWASM' : '''
 	DrawSplineLinearWASM(ptr,l,t,fill,r, g, b, a){
-		const buf=this.wasm.instance.exports.memory.buffer;
+		const buf=wasm_memory();
 		const p=new Float32Array(buf,ptr,l*2);
 		this.ctx.strokeStyle='black';
 		if(fill)this.ctx.fillStyle='rgba('+r+','+g+','+b+','+a+')';
@@ -1650,7 +1649,7 @@ raylib_like_api = {
 	''',
 	'DrawCircleWASM' : '''
 	DrawCircleWASM(x,y,rad,ptr){
-		const buf=this.wasm.instance.exports.memory.buffer;
+		const buf=wasm_memory();
 		const [r, g, b, a]=new Uint8Array(buf, ptr, 4);
 		this.ctx.strokeStyle = 'black';
 		this.ctx.beginPath();
@@ -1663,7 +1662,7 @@ raylib_like_api = {
 	'draw_svg' : '''
 	draw_svg (pos, size, fillColor, lineWidth, lineColor, id, idLen, pathData, pathDataLen, zIndex, cyclic, collide, quantizeType)
 	{
-		const buf = this.wasm.instance.exports.memory.buffer;
+		const buf = wasm_memory();
 		const pos_ = new Float32Array(buf, pos, 8);
 		const size_ = new Float32Array(buf, size, 8);
 		const fillColor_ = new Uint8Array(buf, fillColor, 4);
@@ -1691,7 +1690,7 @@ raylib_like_api = {
 	''',
 	'ClearBackground' : '''
 	ClearBackground(ptr) {
-		this.ctx.fillStyle = getColorFromMemory(this.wasm.instance.exports.memory.buffer, ptr);
+		this.ctx.fillStyle = getColorFromMemory(wasm_memory(), ptr);
 		this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height)
 	}
 	''',
@@ -1702,7 +1701,7 @@ raylib_like_api = {
 	''',
 	'ColorFromHSV' : '''
 	ColorFromHSV(result_ptr, hue, saturation, value) {
-		const buffer = this.wasm.instance.exports.memory.buffer;
+		const buffer = wasm_memory();
 		const result = new Uint8Array(buffer, result_ptr, 4);
 
 		// Red channel
@@ -1735,7 +1734,7 @@ raylib_like_api = {
 	'add_group' : '''
 	add_group (id, idLen, firstAndLastChildIds, firstAndLastChildIdsLen)
 	{
-		const buf = this.wasm.instance.exports.memory.buffer;
+		const buf = wasm_memory();
 		var decoder = new TextDecoder();
 		const id_ = decoder.decode(new Uint8Array(buf, id, idLen - 1));
 		const firstAndLastChildIds_ = decoder.decode(new Uint8Array(buf, firstAndLastChildIds, firstAndLastChildIdsLen));
@@ -1764,7 +1763,7 @@ raylib_like_api = {
 	'copy_node' : '''
 	copy_node (id, idLen, pos)
 	{
-		const buf = this.wasm.instance.exports.memory.buffer;
+		const buf = wasm_memory();
 		if (idLen > 0)
 			var id_ = new TextDecoder().decode(new Uint8Array(buf, id, idLen - 1));
 		else
@@ -1858,8 +1857,6 @@ def GenJsAPI (world, c3, userMethods):
 		skip.append('overlaps')
 	if not IsInAnyElement('random', [ c3, userJsLibAPI, draw_, setup_ ]):
 		skip.append('random')
-	# if not IsInAnyElement('method', [ c3, userJsLibAPI, draw_, setup_ ]):
-	# 	skip.append('method')
 	if world.c3_js13kb:
 		js = [ userJsLibAPI, JS_LIB_API_ENV_MINI, JS_LIB_API ]
 	else:
@@ -2029,7 +2026,7 @@ def BuildWasm (world):
 			if methodName != 'raylib_js_set_entry':
 				oStr = oStr.replace(methodName, raylib_like_api_mini[methodName]['sym'])
 		oStr = oStr.replace('\t', '').replace('  ', '').replace(', ', ',').replace(' (', '(').replace(' {', '{').replace('{ ', '{').replace(' }', '}').replace(' =', '=').replace('= ', '=').replace(' : ', ':').replace(' + ', '+').replace(' / ', '/').replace('] ', ']').replace(' *', '*').replace('* ', '*').replace(') ', ')')
-	#print(oStr)
+	# print(oStr)
 	tmp = '/tmp/c3blender.c3'
 	open(tmp, 'w').write(oStr)
 	wasm = Build(input = tmp, wasm = True, opt = world.c3_export_opt)
